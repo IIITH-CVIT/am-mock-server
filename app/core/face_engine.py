@@ -44,6 +44,7 @@ class FaceEngine:
         )
         self.detector_input_name = self.detector_session.get_inputs()[0].name
         self.detector_output_names = [o.name for o in self.detector_session.get_outputs()]
+        self._validate_detector_outputs(cfg.face_detector_path)
 
         self.session = onnxruntime.InferenceSession(
             cfg.face_recognizer_path, providers=["CPUExecutionProvider"]
@@ -51,6 +52,27 @@ class FaceEngine:
         self.model_name = "mobilefacenet"
         self._input_name = self.session.get_inputs()[0].name
         self.embedding_dim = int(self.session.get_outputs()[0].shape[-1])
+    
+    def _validate_detector_outputs(self, model_path: str) -> None:
+        """Fail fast at startup, not mid-request, if the detector ONNX export doesn't have the tensor names _yunet_postprocess expects."""
+
+        expected = {
+            f"{prefix}_{stride}"
+            for stride in self.YUNET_STRIDES
+            for prefix in ("cls", "obj", "bbox", "kps")
+        }
+
+        missing = expected - set(self.detector_output_names)
+
+        if missing:
+            raise RuntimeError(
+                f"Face detector model at {model_path!r} is missing expected "
+                f"output tensor(s) {sorted(missing)}. This model export doesn't "
+                f"match the YuNet variant this engine expects (strides "
+                f"{self.YUNET_STRIDES}, actual outputs: {self.detector_output_names}). "
+                f"Check config.yaml's models.face_detector_path points at the "
+                f"correct model file."
+            )
 
     def _yunet_preprocess(self, image: np.ndarray) -> dict:
         """Letterbox resize into a square canvas, BGR uint8 as float, NCHW, no normalization."""
