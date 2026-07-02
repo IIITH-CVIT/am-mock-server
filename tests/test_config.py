@@ -1,0 +1,20 @@
+import yaml
+from app.core.config import Settings 
+
+def test_dataclass_defaults_match_config_yaml():
+    """Guards against the two config files drifting apart silently. If this fails, it means that either config.yaml or config.py has been changed, and the dataclasses haven;t been synced"""
+
+    with open("config.yaml") as f:
+        yaml_values = yaml.safe_load(f)
+    defaults = Settings()
+
+    assert defaults.database.path == yaml_values["database"]["path"]
+    assert defaults.identify.face_recognition_threshold == yaml_values["identify"]["face_recognition_threshold"]
+    assert defaults.identity.fingerprint_recognition_threshold == yaml_values["identify"]["fingerprint_recognition_threshold"]
+    assert defaults.identify.default_n == yaml_values["identify"]["default_n"]
+    assert defaults.models.face_detector_score_threshold == yaml_values["models"]["face_detector_score_threshold"]
+
+def test_missing_config_file_warns(capsys, tmp_path):
+    from app.core.config import load settings 
+    load_settings(path = str(tmp_path / "does-not-exist.yaml"))
+    assert "WARNING" in capsys.readouterr().out

@@ -102,6 +102,9 @@ identify:
   default_n: 10
 ```
 
+`config.yaml` is the single source of truth for all settings. If it's missing or unreadable at startup (e.g. `CONFIG_PATH` misconfigured, bind mount missing), the server logs a `WARNING` and falls back to the built-in defaults in `app/core/config.py`, and those defaults are kept in sync with the shipped `config.yaml` and covered by a test (`tests/test_config.py`), but if you ever
+see that warning in the logs, something is wrong with your bind mount, not your config values.
+
 ## Face pipeline
 
 [app/core/face_engine.py](app/core/face_engine.py) mirrors the real server's
