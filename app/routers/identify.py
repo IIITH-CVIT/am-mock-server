@@ -2,7 +2,7 @@ import json
 from typing import Literal, Optional
 
 import numpy as np
-from fastapi import APIRouter, Form
+from fastapi import APIRouter, Form, HTTPException
 
 from app.core.config import settings
 from app.core.database import get_conn, get_registration, list_vectors_by_kind
@@ -10,13 +10,20 @@ from app.schemas.identify import IdentifyResponse
 
 router = APIRouter(prefix="/api/v1/identify", tags=["identify"])
 
-
 def _parse_vector(raw: str) -> list[float]:
     raw = raw.strip()
-    if raw.startswith("["):
-        return [float(x) for x in json.loads(raw)]
-    return [float(x) for x in raw.split(",") if x.strip()]
 
+    try:
+        if raw.startswith("["):
+            vec = [float(x) for x in json.loads(raw)]
+        else:
+            vec = [float(x) for x in raw.split(",") if x.strip()]
+    except(json.JSONDecodeError, ValueError) as exc:
+        raise HTTPException(status_code = 400, detail = f"invalid vector format: {exc}")
+    
+    if not vec:
+        raise HTTPException(status_code = 400, detail = "vector must not be empty")
+    return vec 
 
 def _normalized_l2_distance(a: np.ndarray, b: np.ndarray) -> float:
     a_norm = np.linalg.norm(a)
@@ -24,7 +31,6 @@ def _normalized_l2_distance(a: np.ndarray, b: np.ndarray) -> float:
     if a_norm == 0 or b_norm == 0:
         return float("inf")
     return float(np.linalg.norm(a / a_norm - b / b_norm))
-
 
 def _find_best_match(kind: str, query: list[float], vector_type: Optional[str]):
     """Returns (registration, distance) for the closest stored vector, smallest normalized L2 distance wins."""
@@ -43,7 +49,6 @@ def _find_best_match(kind: str, query: list[float], vector_type: Optional[str]):
             return None, None
         registration = get_registration(conn, best_row["registration_id"])
         return registration, best_distance
-
 
 @router.post("/", response_model=IdentifyResponse, summary="Identify")
 def identify(

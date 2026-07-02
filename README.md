@@ -76,6 +76,8 @@ Optional `vector_type` (`registration` / `fru` / `sau`) filters candidates by
 source. Returns an `IdentifyResponse` with `match_type`, `distance`,
 `confidence`, and the matched registration's fields when found.
 
+400 if `face_vector` / `fingerprint_vector` isn't a valid JSON or comma separated floating-point values, or is empty. 
+
 ## Configuration
 
 `config.yaml` (bind-mounted, read on startup — see [app/core/config.py](app/core/config.py)):
