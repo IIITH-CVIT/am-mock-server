@@ -40,3 +40,33 @@ async def test_register_does_not_block_event_loop(monkeypatch):
     assert health_elapsed < 0.5, (
         f"/health took {health_elapsed:.2f}s - register() is blocking the event loop"
     )
+
+def test_register_rejects_oversized_full_name(client):
+    resp = client.post(
+        "/api/v1/registrations/register",
+        data={
+            "full_name": "A" * 201,
+            "date_of_visit": "2026-07-01",
+            "timeslot": "10:00",
+            "ticket_category": "general",
+        },
+        files={"image": ("f.jpg", b"fake-bytes", "image/jpeg")},
+    )
+    assert resp.status_code == 422
+
+def test_register_rejects_empty_full_name(client):
+    resp = client.post(
+        "/api/v1/registrations/register",
+        data={"full_name": "", "date_of_visit": "2026-07-01",
+              "timeslot": "10:00", "ticket_category": "general"},
+        files={"image": ("f.jpg", b"fake-bytes", "image/jpeg")},
+    )
+    assert resp.status_code == 422
+
+def test_list_registrations_caps_limit(client):
+    resp = client.get("/api/v1/registrations/?limit=999999")
+    assert resp.status_code == 422   
+
+def test_list_registrations_default_limit_ok(client):
+    resp = client.get("/api/v1/registrations/")
+    assert resp.status_code == 200
