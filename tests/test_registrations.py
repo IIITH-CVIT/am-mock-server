@@ -70,3 +70,35 @@ def test_list_registrations_caps_limit(client):
 def test_list_registrations_default_limit_ok(client):
     resp = client.get("/api/v1/registrations/")
     assert resp.status_code == 200
+
+def test_register_rejects_non_image_content_type(client):
+    resp = client.post(
+        "/api/v1/registrations/register",
+        data={"full_name": "Test", "date_of_visit": "2026-07-01",
+              "timeslot": "10:00", "ticket_category": "general"},
+        files={"image": ("f.txt", b"not an image", "text/plain")},
+    )
+    assert resp.status_code == 415
+
+def test_register_rejects_oversized_image(client):
+    huge = b"\x00" * (10 * 1024 * 1024 + 1)
+    resp = client.post(
+        "/api/v1/registrations/register",
+        data={"full_name": "Test", "date_of_visit": "2026-07-01",
+              "timeslot": "10:00", "ticket_category": "general"},
+        files={"image": ("f.jpg", huge, "image/jpeg")},
+    )
+    assert resp.status_code == 413
+
+def test_register_accepts_image_at_exact_limit(client, monkeypatch):
+    # confirms the +1 boundary math doesn't off-by-one reject legitimate uploads
+    from app.core import face_engine as fe_module
+    monkeypatch.setattr(fe_module.face_engine, "embed", lambda b: [0.1] * 512)
+    exactly_at_limit = b"\x00" * (10 * 1024 * 1024)
+    resp = client.post(
+        "/api/v1/registrations/register",
+        data={"full_name": "Test", "date_of_visit": "2026-07-01",
+              "timeslot": "10:00", "ticket_category": "general"},
+        files={"image": ("f.jpg", exactly_at_limit, "image/jpeg")},
+    )
+    assert resp.status_code != 413

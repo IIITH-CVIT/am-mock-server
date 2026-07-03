@@ -55,10 +55,10 @@ The Docker image bakes in the application code, so after changing files under
 | `date_of_visit`   | str  | required, ISO date (`YYYY-MM-DD`)     |
 | `timeslot`        | str  | required, ISO time (`HH:MM[:SS]`)     |
 | `ticket_category` | str  | required, 1 - 100 characters          |
-| `image`           | file | required, one face photo              |
+| `image`           | file | required, one face photo  , `image/*`, max 10MB|
 
 Returns `{ registration_id, status, message }`. 422 if no face is detected in
-the image; 400 if the date/time can't be parsed.
+the image; 400 if the date/time can't be parsed; 415 if the uploaded file's content-type isn't `image/*`; 413 if it exceeds 10MB.
 
 Detection + embedding runs synchronously on CPU (~a few hundred ms per image depending on hardware), so a single `register` call blocks for that long. This mirrors the real server's own per-request latency for this step, it isn't mock-specific overhead.
 
