@@ -76,6 +76,8 @@ Optional `vector_type` (`registration` / `fru` / `sau`) filters candidates by
 source. Returns an `IdentifyResponse` with `match_type`, `distance`,
 `confidence`, and the matched registration's fields when found.
 
+400 if `face_vector` / `fingerprint_vector` isn't a valid JSON or comma separated floating-point values, or is empty. 
+
 ## Configuration
 
 `config.yaml` (bind-mounted, read on startup — see [app/core/config.py](app/core/config.py)):
@@ -99,6 +101,9 @@ identify:
   fingerprint_recognition_threshold: 0.7
   default_n: 10
 ```
+
+`config.yaml` is the single source of truth for all settings. If it's missing or unreadable at startup (e.g. `CONFIG_PATH` misconfigured, bind mount missing), the server logs a `WARNING` and falls back to the built-in defaults in `app/core/config.py`, and those defaults are kept in sync with the shipped `config.yaml` and covered by a test (`tests/test_config.py`), but if you ever
+see that warning in the logs, something is wrong with your bind mount, not your config values.
 
 ## Face pipeline
 
