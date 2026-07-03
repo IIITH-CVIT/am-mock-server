@@ -40,7 +40,7 @@ class Settings:
 def load_settings(path: str = CONFIG_PATH) -> Settings:
     if not os.path.exists(path):
         print(
-            f"WARNING: config file not found at {path|r} - using built-in defaults."
+            f"WARNING: config file not found at {path!r} - using built-in defaults."
             f"If this is unexpected, check CONFIG_PATH and the bind mount in compose.yml"
         )
         raw = {}

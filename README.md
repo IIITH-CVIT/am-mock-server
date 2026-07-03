@@ -112,6 +112,9 @@ pipeline: YuNet (ONNX) detects a face and 5 landmarks, the face is aligned into
 a 112x112 ArcFace pose, and MobileFaceNet (ONNX) produces a normalized 512-dim
 embedding. Both models run via `onnxruntime` (CPU).
 
+The detector is expected to be a YuNet export with per-stride outputs named `cls_{8,16,32}`, `obj_{8,16,32}`, `bbox_{8,16,32}`, `kps_{8,16,32}`. This is validated at startup. If you swap in a different YuNet export (e.g. a differently-converted ONNX file) and the container fails to start with a `RuntimeError` mentioning "missing expected output tensor", that's this check
+—point `models.face_detector_path` in `config.yaml` at a model exported with the standard YuNet output naming.
+
 ## Utilities
 
 - `./query_db.sh` — open a `sqlite3` shell on `data/db.sqlite`.
