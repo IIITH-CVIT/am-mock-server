@@ -39,6 +39,10 @@ rebuilds/restarts.
 The Docker image bakes in the application code, so after changing files under
 `app/` you need to rebuild (`./run.sh` again) to pick up the changes.
 
+### Concurrency
+
+`register` and `identify` both run in FastAPI's threadpool rather than on the main event loop, so concurrent requests (e.g. simulating multiple kiosks registering at once) don't block each other or `/health`. If you're benchmarking or load-testing against this mock, note that SQLite itself becomes the bottleneck under heavy concurrent writes before the app layer does. This mock isn't a substitute for load-testing against the real Postgres-backed server.
+
 ## API
 
 ### `POST /api/v1/registrations/register`
@@ -55,6 +59,8 @@ The Docker image bakes in the application code, so after changing files under
 
 Returns `{ registration_id, status, message }`. 422 if no face is detected in
 the image; 400 if the date/time can't be parsed.
+
+Detection + embedding runs synchronously on CPU (~a few hundred ms per image depending on hardware), so a single `register` call blocks for that long. This mirrors the real server's own per-request latency for this step, it isn't mock-specific overhead.
 
 ### `GET /api/v1/registrations/` and `GET /api/v1/registrations/{id}`
 
