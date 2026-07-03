@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, time
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile, Query
 
 from app.core.database import (
     get_conn,
@@ -18,10 +18,10 @@ router = APIRouter(prefix="/api/v1/registrations", tags=["registrations"])
 
 @router.post("/register", response_model=RegistrationResult, summary="Register")
 def register(
-    full_name: str = Form(...),
+    full_name: str = Form(..., min_length = 5, max_length = 200),
     date_of_visit: str = Form(..., description="ISO date, e.g. 2026-07-01"),
     timeslot: str = Form(..., description="ISO time, e.g. 10:00 or 10:00:00"),
-    ticket_category: str = Form(...),
+    ticket_category: str = Form(..., min_length = 5, max_length = 200),
     image: UploadFile = File(...),
 ) -> RegistrationResult:
     """Seed a person's registration: name + visit details + one face image.
@@ -63,7 +63,7 @@ def register(
 
 
 @router.get("/", response_model=list[RegistrationOut], summary="List Registrations")
-def list_all(skip: int = 0, limit: int = 100) -> list[RegistrationOut]:
+def list_all(skip: int = Query(0, ge = 0), limit: int = Query(100, ge = 1, le = 500)) -> list[RegistrationOut]:
     with get_conn() as conn:
         rows = list_registrations(conn, skip=skip, limit=limit)
         out = []

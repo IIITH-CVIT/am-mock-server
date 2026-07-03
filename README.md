@@ -51,10 +51,10 @@ The Docker image bakes in the application code, so after changing files under
 
 | field             | type | notes                                |
 |-------------------|------|---------------------------------------|
-| `full_name`       | str  | required                              |
+| `full_name`       | str  | required, 1 - 200 characters          |
 | `date_of_visit`   | str  | required, ISO date (`YYYY-MM-DD`)     |
 | `timeslot`        | str  | required, ISO time (`HH:MM[:SS]`)     |
-| `ticket_category` | str  | required, free text                   |
+| `ticket_category` | str  | required, 1 - 100 characters          |
 | `image`           | file | required, one face photo              |
 
 Returns `{ registration_id, status, message }`. 422 if no face is detected in
@@ -66,6 +66,7 @@ Detection + embedding runs synchronously on CPU (~a few hundred ms per image dep
 
 List/fetch registrations, including visit details and stored vector metadata
 (kind/model/dim — not the raw vector).
+`limit` defaults to 100, capped at 500 (`422` if exceeded)
 
 ### `POST /api/v1/identify/`
 
