@@ -25,8 +25,8 @@ return "no match found".
 ./run.sh
 ```
 
-This runs `docker compose up --build`. The server listens on
-`http://localhost:8000`:
+This runs `podman compose up --build` (Podman; the image also builds fine under plain Docker if you don't have Podman installed. Swap `podman compose` for `docker compose` in `run.sh` and it works identically, since `Containerfile` uses standard Docker-compatible build syntax). The
+server listens on `http://localhost:8000`:
 
 - `/` — registration web UI
 - `/docs` — interactive API docs (Swagger UI)
