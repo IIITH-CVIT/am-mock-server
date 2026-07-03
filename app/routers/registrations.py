@@ -17,7 +17,7 @@ router = APIRouter(prefix="/api/v1/registrations", tags=["registrations"])
 
 
 @router.post("/register", response_model=RegistrationResult, summary="Register")
-async def register(
+def register(
     full_name: str = Form(...),
     date_of_visit: str = Form(..., description="ISO date, e.g. 2026-07-01"),
     timeslot: str = Form(..., description="ISO time, e.g. 10:00 or 10:00:00"),
@@ -35,7 +35,7 @@ async def register(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"invalid date/time format: {exc}")
 
-    image_bytes = await image.read()
+    image_bytes = image.file.read()
     try:
         vector = face_engine.embed(image_bytes)
     except NoFaceDetectedError:
