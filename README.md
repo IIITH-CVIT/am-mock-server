@@ -75,9 +75,10 @@ List/fetch registrations, including visit details and stored vector metadata
 - `type=id`, `id=<registration_id>` — direct lookup.
 - `type=face`, `face_vector=<JSON array or comma-separated floats>` — nearest
   stored face embedding (512-dim, MobileFaceNet) within
-  `identify.face_recognition_threshold`.
+  `identify.face_recognition_threshold`. Must exactly be 512-dimensions, else a `400` error is thrown
 - `type=fingerprint` — accepted but always returns "no match found" (see
-  above).
+  above). Vectors longer than 4096 elements are rejected with `400`
+  regardless of type.
 
 Optional `vector_type` (`registration` / `fru` / `sau`) filters candidates by
 source. Returns an `IdentifyResponse` with `match_type`, `distance`,

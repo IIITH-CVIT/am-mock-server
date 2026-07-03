@@ -4,9 +4,12 @@ from typing import Literal, Optional
 import numpy as np
 from fastapi import APIRouter, Form, HTTPException
 
+MAX_VECTOR_LENGTH = 4096
+
 from app.core.config import settings
 from app.core.database import get_conn, get_registration, list_vectors_by_kind
 from app.schemas.identify import IdentifyResponse
+from app.core.face_engine import face_engine
 
 router = APIRouter(prefix="/api/v1/identify", tags=["identify"])
 
@@ -23,6 +26,11 @@ def _parse_vector(raw: str) -> list[float]:
     
     if not vec:
         raise HTTPException(status_code = 400, detail = "vector must not be empty")
+    if len(vec) > max_length:
+        raise HTTPException(
+            status_code = 400,
+            detail = f"Vector length {len(vec)} exceeds max allowed {max_length}"
+        )
     return vec 
 
 def _normalized_l2_distance(a: np.ndarray, b: np.ndarray) -> float:
@@ -89,6 +97,12 @@ def identify(
         if not face_vector:
             return IdentifyResponse(message="face_vector is required for type=face")
         query = _parse_vector(face_vector)
+        expected_dim = face_engine.embedding_dim
+        if len(query) != expected_dim:
+            raise HTTPException(
+                status_code = 400,
+                detail = f"face_vector has {len(query)} dimensions, expected {expected_dim}",
+            )
         registration, distance = _find_best_match("face", query, vector_type)
         threshold = settings.identify.face_recognition_threshold
     else:
