@@ -15,6 +15,7 @@ from app.schemas.registration import RegistrationOut, RegistrationResult, Vector
 
 router = APIRouter(prefix="/api/v1/registrations", tags=["registrations"])
 
+MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024
 
 @router.post("/register", response_model=RegistrationResult, summary="Register")
 def register(
@@ -29,13 +30,26 @@ def register(
     Detects the face and computes an embedding; only the name, visit details,
     and vector are persisted (the image bytes are discarded after embedding).
     """
+    
+    if not image.content_type or not image.content_type.startswith("image/"):
+        raise HTTPException(
+            status_code = 415,
+            detail = f"Expected an image file, got content_type = {image.content_type!r}",
+        )
+        
     try:
         date.fromisoformat(date_of_visit)
         time.fromisoformat(timeslot)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"invalid date/time format: {exc}")
 
-    image_bytes = image.file.read()
+    image_bytes = image.file.read(MAX_IMAGE_SIZE_BYTES + 1)
+    if len(image_bytes) > MAX_IMAGE_SIZE_BYTES:
+        raise HTTPException(
+            status_code = 413,
+            detail = f"Image exceeds max size of {MAX_IMAGE_SIZE_BYTES // (1024 * 1024)}MB",
+        )
+
     try:
         vector = face_engine.embed(image_bytes)
     except NoFaceDetectedError:
