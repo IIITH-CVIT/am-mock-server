@@ -1,3 +1,6 @@
+import json
+
+
 def test_malformed_face_vector_returns_400(client):
     resp = client.post("api/v1/identify/", data = {
         "type": "face",
@@ -16,7 +19,7 @@ def test_face_vector_wrong_dimension_returns_400(client):
         "face_vector": json.dumps([0.1] * 256),  # not 512
     })
     assert resp.status_code == 400
-    assert "expected" in resp.json()["detail"].
+    assert "expected" in resp.json()["detail"]
 
 def test_face_vector_correct_dimension_reaches_search(client):
     resp = client.post("/api/v1/identify/", data={

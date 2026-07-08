@@ -61,11 +61,13 @@ identical to a genuine no-match; it's a `400` now.
 
 - **No global exception handler**: any unhandled exception previously returned Starlette's raw plain-text 500 (which broke the web UI's `JSON.parse`). A global handler now logs the full traceback server-side and returns clean JSON `{"detail": "internal server error"}`.
 
-- **`full_name`/`ticket_category` had no length limits; `GET /registrations/` had no `limit` cap**, now `1-200`/`1-100` characters and `limit` capped at 500, both enforced with FastAPI's own `422` validation.
+- **`full_name`/`ticket_category` had no length limits; `GET /registrations/` had no `limit` cap**, now `5-200` characters each and `limit` capped at 500, both enforced with FastAPI's own `422` validation.
 
 - **Config defaults drifted from `config.yaml`**: in-code dataclass defaults now match the shipped `config.yaml` exactly, and a missing config file now logs a `WARNING` at startup instead of silently using different values.
 
 - **YuNet model output names weren't validated**: a mismatched ONNX export now fails fast at container startup with a clear message, instead of an obscure `KeyError` mid-request.
+
+- **Missing model file crashed boot with a raw onnxruntime error**: `FaceEngine()` is built at import time, so if `./models` isn't bind-mounted the container died with an unhelpful `NoSuchFile` stack trace — the classic first-run mistake. Fixed: model loading now fails fast with an actionable message that names the path and points at the `./models` bind mount (and distinguishes a missing file from a present-but-corrupt one).
 
 - **Dockerfile → Containerfile, Podman migration**: see `## Running` below.
 
@@ -79,10 +81,10 @@ identical to a genuine no-match; it's a `400` now.
 
 | field             | type | notes                                |
 |-------------------|------|---------------------------------------|
-| `full_name`       | str  | required, 1 - 200 characters          |
+| `full_name`       | str  | required, 5 - 200 characters          |
 | `date_of_visit`   | str  | required, ISO date (`YYYY-MM-DD`)     |
 | `timeslot`        | str  | required, ISO time (`HH:MM[:SS]`)     |
-| `ticket_category` | str  | required, 1 - 100 characters          |
+| `ticket_category` | str  | required, 5 - 200 characters          |
 | `image`           | file | required, one face photo  , `image/*`, max 10MB|
 
 Returns `{ registration_id, status, message }`. 422 if no face is detected in
