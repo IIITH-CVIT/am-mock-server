@@ -69,6 +69,8 @@ identical to a genuine no-match; it's a `400` now.
 
 - **Dockerfile → Containerfile, Podman migration**: see `## Running` below.
 
+- **Bind mounts failed under rootless Podman on SELinux-enforcing hosts (Fedora/RHEL)**: without an SELinux relabel suffix the container gets permission-denied reading `./config.yaml`/`./models` and writing `./data`. Fixed: `compose.yml` now carries `:Z` (private relabel) on each bind mount (`:ro,Z` for the read-only ones). It's a no-op on non-SELinux hosts (plain Docker on Ubuntu), so it's safe cross-platform; switch to `:z` if you ever share a mount between containers.
+
 ## API
 
 ### `POST /api/v1/registrations/register`
