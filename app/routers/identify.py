@@ -13,7 +13,7 @@ from app.core.face_engine import face_engine
 
 router = APIRouter(prefix="/api/v1/identify", tags=["identify"])
 
-def _parse_vector(raw: str) -> list[float]:
+def _parse_vector(raw: str, max_length: int = MAX_VECTOR_LENGTH) -> list[float]:
     raw = raw.strip()
 
     try:
