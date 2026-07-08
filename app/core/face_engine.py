@@ -1,3 +1,5 @@
+import os
+
 import cv2
 import numpy as np
 import onnxruntime
@@ -39,20 +41,46 @@ class FaceEngine:
         self.yunet_input_size = cfg.face_detector_input_size
         self.score_threshold = cfg.face_detector_score_threshold
 
-        self.detector_session = onnxruntime.InferenceSession(
-            cfg.face_detector_path, providers=["CPUExecutionProvider"]
+        self.detector_session = self._load_onnx_session(
+            cfg.face_detector_path, "Face detector (YuNet)"
         )
         self.detector_input_name = self.detector_session.get_inputs()[0].name
         self.detector_output_names = [o.name for o in self.detector_session.get_outputs()]
         self._validate_detector_outputs(cfg.face_detector_path)
 
-        self.session = onnxruntime.InferenceSession(
-            cfg.face_recognizer_path, providers=["CPUExecutionProvider"]
+        self.session = self._load_onnx_session(
+            cfg.face_recognizer_path, "Face recognizer (MobileFaceNet)"
         )
         self.model_name = "mobilefacenet"
         self._input_name = self.session.get_inputs()[0].name
         self.embedding_dim = int(self.session.get_outputs()[0].shape[-1])
-    
+
+    @staticmethod
+    def _load_onnx_session(path: str, label: str) -> onnxruntime.InferenceSession:
+        """Load an ONNX model, failing fast with an actionable message.
+
+        FaceEngine() is instantiated at import time (module scope), so a missing
+        or unreadable model file otherwise crashes container boot with a raw
+        onnxruntime error. The overwhelmingly common cause on a fresh checkout is
+        the ./models bind mount not being wired up — name that explicitly, and
+        distinguish it from a present-but-corrupt file.
+        """
+        try:
+            return onnxruntime.InferenceSession(path, providers=["CPUExecutionProvider"])
+        except Exception as exc:
+            if not os.path.exists(path):
+                raise RuntimeError(
+                    f"{label} model not found at {path!r}. Check that ./models is "
+                    f"bind-mounted into the container (see compose.yml / README) and "
+                    f"that the matching models.*_path in config.yaml points at the "
+                    f"correct file."
+                ) from exc
+            raise RuntimeError(
+                f"Failed to load {label} model at {path!r}: {exc}. The file exists "
+                f"but onnxruntime could not load it — it may be corrupt or not a "
+                f"valid ONNX export."
+            ) from exc
+
     def _validate_detector_outputs(self, model_path: str) -> None:
         """Fail fast at startup, not mid-request, if the detector ONNX export doesn't have the tensor names _yunet_postprocess expects."""
 

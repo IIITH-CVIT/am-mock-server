@@ -6,11 +6,11 @@ def _fake_session_with_outputs(names):
     session = MagicMock()
     session.get_inputs.return_value = [MagicMock(name = "input")]
     session.get_outputs.return_value = [MagicMock(name = n) for n in names]
-    for out, n in zip(session.get_outputs.return_value, name):
+    for out, n in zip(session.get_outputs.return_value, names):
         out.name = n
     session.get_inputs.return_value[0].name = "input"
 
-    return session 
+    return session
 
 def test_missing_output_name_fails_fast():
     incomplete = _fake_session_with_outputs(["cls_8", "obj_8", "bbox_8", "kps_8"])  # missing stride 16/32
@@ -26,3 +26,18 @@ def test_correct_output_names_pass():
     with patch("onnxruntime.InferenceSession", side_effect=[good_detector, good_recognizer]):
         engine = FaceEngine()  # should not raise
         assert engine.embedding_dim == 512
+
+def test_missing_model_file_reports_bind_mount_hint():
+    """A missing model file (the classic un-wired ./models bind mount) must fail
+    with a clear, actionable message — not a raw onnxruntime error at boot."""
+    with patch("onnxruntime.InferenceSession", side_effect=Exception("load failed")), \
+         patch("app.core.face_engine.os.path.exists", return_value=False):
+        with pytest.raises(RuntimeError, match="not found.*bind-mounted"):
+            FaceEngine()
+
+def test_corrupt_model_file_reports_load_failure():
+    """A present-but-unloadable file gets a different, equally clear message."""
+    with patch("onnxruntime.InferenceSession", side_effect=Exception("invalid onnx")), \
+         patch("app.core.face_engine.os.path.exists", return_value=True):
+        with pytest.raises(RuntimeError, match="could not load it"):
+            FaceEngine()
