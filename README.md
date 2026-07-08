@@ -43,6 +43,32 @@ The Docker image bakes in the application code, so after changing files under
 
 `register` and `identify` both run in FastAPI's threadpool rather than on the main event loop, so concurrent requests (e.g. simulating multiple kiosks registering at once) don't block each other or `/health`. If you're benchmarking or load-testing against this mock, note that SQLite itself becomes the bottleneck under heavy concurrent writes before the app layer does. This mock isn't a substitute for load-testing against the real Postgres-backed server.
 
+## Known Issues & Fixes
+
+The following were found and fixed:
+
+- **Registration DB writes failing (`sqlite3.OperationalError: attempt to write a readonly database`)** caused by `./data` being owned by `root` on the host from an earlier container run under a different UID mapping. Fixed by `sudo chown -R $(id -u):$(id -g) ./data`. If you hit this again after a fresh clone, check `ls -ld ./data` first, it must be owned by your own
+user, not root.
+
+- **`register()` blocked the event loop** was `async def` calling a synchronous, CPU-bound ONNX embed directly; now runs threadpooled like identify()` already did, so concurrent requests (including `/health`) don't stall during a registration.
+
+- **Malformed `face_vector`/`fingerprint_vector` caused an unhandled 500**: `_parse_vector` now catches JSON/parse errors and returns a clean `400`, and rejects empty vectors or vectors over 4096 elements.
+
+- **`face_vector` with the wrong dimension silently returned "no match found"**. Now returns an explicit `400` naming the expected dimension (512, read from the loaded model) vs. what was sent. This is a response-shape change from earlier behavior: a wrong-dim vector used to look
+identical to a genuine no-match; it's a `400` now.
+
+- **Unbounded file upload**: `register`'s `image` field now requires `content_type` to start with `image/` (`415` otherwise) and caps upload size at 10MB (`413` otherwise).
+
+- **No global exception handler**: any unhandled exception previously returned Starlette's raw plain-text 500 (which broke the web UI's `JSON.parse`). A global handler now logs the full traceback server-side and returns clean JSON `{"detail": "internal server error"}`.
+
+- **`full_name`/`ticket_category` had no length limits; `GET /registrations/` had no `limit` cap**, now `1-200`/`1-100` characters and `limit` capped at 500, both enforced with FastAPI's own `422` validation.
+
+- **Config defaults drifted from `config.yaml`**: in-code dataclass defaults now match the shipped `config.yaml` exactly, and a missing config file now logs a `WARNING` at startup instead of silently using different values.
+
+- **YuNet model output names weren't validated**: a mismatched ONNX export now fails fast at container startup with a clear message, instead of an obscure `KeyError` mid-request.
+
+- **Dockerfile → Containerfile, Podman migration**: see `## Running` below.
+
 ## API
 
 ### `POST /api/v1/registrations/register`
@@ -151,3 +177,15 @@ Dockerfile
 run.sh
 query_db.sh
 ```
+
+## Running end-to-end with the mock client
+
+1. Start this server: `podman compose up --build` (see `## Running` above). Confirm: `curl http://localhost:8000/health`
+
+2. Register at least one face via the web UI at `http://localhost:8000`.
+
+3. In `iiith-cvit-am-mock-client`, create `config.mock-server.yaml` (copy of `config.yaml` with `server.url: http://localhost:8000`, `detection.detector: yunet`, `embedder.model: mobilefacenet`).
+
+4. `.venv/bin/python client.py --config config.mock-server.yaml --server <photo>` — should print `Recognised: <name>` for a photo of someone you registered in step 2, with `distance` comfortably under `0.8`.
+
+See `iiith-cvit-am-mock-client/README.md` for full client setup.
