@@ -21,11 +21,13 @@ return "no match found".
 
 ## Running
 
+**Prerequisites:** a Linux host with `sudo` and internet access on the first run (to install Podman and build the image). Nothing else to install by hand — Python 3.13 and every library live inside the container, and the ONNX models are bundled in `./models`. (macOS works too via `brew`, but needs `podman machine start` first.)
+
 ```bash
 ./run.sh
 ```
 
-This runs `podman compose up --build` (Podman; the image also builds fine under plain Docker if you don't have Podman installed. Swap `podman compose` for `docker compose` in `run.sh` and it works identically, since `Containerfile` uses standard Docker-compatible build syntax). The
+`run.sh` bootstraps the toolchain: if `podman` or a compose provider (`podman-compose`) isn't installed, it installs them via the host package manager (`dnf`/`yum` on Fedora/RHEL, `apt` on Debian/Ubuntu, also `zypper`/`pacman`/`brew`) — this needs `sudo` and network access. It's idempotent: if everything's already present it just builds and starts the stack (`podman compose up --build`). The `Containerfile` uses standard Docker-compatible build syntax, so it also builds fine under plain Docker (`docker compose up --build`) if you prefer. The
 server listens on `http://localhost:8000`:
 
 - `/` — registration web UI
@@ -42,6 +44,55 @@ The Docker image bakes in the application code, so after changing files under
 ### Concurrency
 
 `register` and `identify` both run in FastAPI's threadpool rather than on the main event loop, so concurrent requests (e.g. simulating multiple kiosks registering at once) don't block each other or `/health`. If you're benchmarking or load-testing against this mock, note that SQLite itself becomes the bottleneck under heavy concurrent writes before the app layer does. This mock isn't a substitute for load-testing against the real Postgres-backed server.
+
+## How to use
+
+A walkthrough once the server is up (`./run.sh`, then `curl http://localhost:8000/health` → `{"status":"ok"}`).
+
+### 1. Register a face (web UI)
+
+Open **http://localhost:8000** in a browser and fill the form:
+
+| Field | Example | Rule |
+|---|---|---|
+| Full name | `Alice Kumar` | ≥ 5 characters |
+| Date of visit | `2026-07-08` | `YYYY-MM-DD` |
+| Time slot | `10:00` | `HH:MM` |
+| Ticket category | `general` | ≥ 5 characters |
+| Photo | webcam capture, or the file-upload fallback | a clear front-facing face |
+
+Submit. The server detects the face, computes a 512-dim embedding, and stores the registration — you get back a `registration_id`. If it reports **"no face detected"**, use a clearer, front-facing photo.
+
+### 2. Confirm it was stored
+
+```bash
+curl http://localhost:8000/api/v1/registrations/        # add "| jq" if you have it
+```
+Lists everyone registered, with their stored vector metadata (kind / model / dim).
+
+### 3. Identify
+
+**By registration ID** (exact lookup — no photo needed):
+```bash
+curl -X POST http://localhost:8000/api/v1/identify/ -F "type=id" -F "id=<registration_id>"
+```
+
+**By face** — this route matches on a 512-dim *vector*, not an image (the server vector-searches; it does not re-embed here). Two easy ways to produce the vector from a photo:
+- **Mock client** (the realistic edge-device flow): `client.py --config config.mock-server.yaml --server photo.jpg` — see the client README, and `## Running end-to-end with the mock client` below.
+- **Inside the container**: `podman compose exec mock-server python -m app.cli_identify /path/to/photo.jpg` — embeds the photo and calls identify for you.
+
+A match returns the person's details with `distance` (lower = better; under `0.8` counts as a match) and `confidence`.
+
+### 4. Inspect the database directly
+
+```bash
+./query_db.sh
+sqlite> SELECT id, full_name, date_of_visit FROM registrations;
+```
+
+### Interactive API docs
+
+**http://localhost:8000/docs** — Swagger UI. Try every endpoint from the browser and see the exact request/response schemas.
 
 ## Known Issues & Fixes
 
@@ -184,12 +235,27 @@ query_db.sh
 
 ## Running end-to-end with the mock client
 
-1. Start this server: `podman compose up --build` (see `## Running` above). Confirm: `curl http://localhost:8000/health`
+The full loop on one machine — mock server + mock client — in four steps. Assumes the two repos sit side by side (`am-mock-server/` and `am-mock-client/`).
 
-2. Register at least one face via the web UI at `http://localhost:8000`.
+**1. Start the server** (this repo):
+```bash
+cd am-mock-server
+./run.sh                                    # installs Podman if needed, builds, starts
+curl http://localhost:8000/health           # -> {"status":"ok"}
+```
 
-3. In `iiith-cvit-am-mock-client`, create `config.mock-server.yaml` (copy of `config.yaml` with `server.url: http://localhost:8000`, `detection.detector: yunet`, `embedder.model: mobilefacenet`).
+**2. Register a face** via the web UI at **http://localhost:8000** (see `## How to use` above). Note the name you used.
 
-4. `.venv/bin/python client.py --config config.mock-server.yaml --server <photo>` — should print `Recognised: <name>` for a photo of someone you registered in step 2, with `distance` comfortably under `0.8`.
+**3. Set up the client** (`am-mock-client`):
+```bash
+cd ../am-mock-client
+./setup.sh                                   # native venv, light deps (no dlib)
+```
 
-See `iiith-cvit-am-mock-client/README.md` for full client setup.
+**4. Identify** with a photo of the same person:
+```bash
+.venv/bin/python client.py --config config.mock-server.yaml --server <photo.jpg>
+# -> >>> Recognised: <name>     (distance comfortably under 0.8)
+```
+
+The client ships **`config.mock-server.yaml`** (yunet + mobilefacenet, 512-dim, `localhost:8000`) precisely for this test — do **not** use its default `config.yaml`, which is the dlib / real-`am-master-server` pairing and would silently never match here. Full client docs: `am-mock-client/README.md`.
