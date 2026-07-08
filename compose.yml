@@ -7,9 +7,15 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./config.yaml:/app/config.yaml:ro
-      - ./models:/app/models:ro
-      - ./data:/app/data
+      # The :Z suffix applies a private SELinux label so rootless Podman on
+      # SELinux-enforcing hosts (Fedora/RHEL) can actually read/write these bind
+      # mounts — without it the container gets permission-denied on ./config.yaml,
+      # ./models and ./data. It's a no-op on non-SELinux hosts (plain Docker on
+      # Ubuntu), so it's safe to leave in. Use :z (shared) instead of :Z if you
+      # ever mount the same path into more than one container.
+      - ./config.yaml:/app/config.yaml:ro,Z
+      - ./models:/app/models:ro,Z
+      - ./data:/app/data:Z
     environment:
       - CONFIG_PATH=/app/config.yaml
     restart: unless-stopped
