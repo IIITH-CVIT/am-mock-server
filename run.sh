@@ -67,5 +67,7 @@ else
     log "compose provider: $COMPOSE"
 fi
 
+mkdir -p data
+
 log "Building and starting the mock server (http://localhost:8000) ..."
 exec $COMPOSE up --build
