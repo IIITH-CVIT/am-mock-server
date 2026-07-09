@@ -13,6 +13,8 @@ from app.core.database import (
 from app.core.face_engine import NoFaceDetectedError, dlib_engine, face_engine
 from app.schemas.registration import RegistrationOut, RegistrationResult, VectorOut
 
+from typing import Literal
+
 import logging
 
 logger = logging.getLogger("mock_server")
@@ -26,7 +28,7 @@ def register(
     full_name: str = Form(..., min_length = 5, max_length = 200),
     date_of_visit: str = Form(..., description="ISO date, e.g. 2026-07-01"),
     timeslot: str = Form(..., description="ISO time, e.g. 10:00 or 10:00:00"),
-    ticket_category: str = Form(..., min_length = 5, max_length = 200),
+    ticket_category: Literal["general", "vip", "vvip", "staff"] = Form(...),
     image: UploadFile = File(...),
 ) -> RegistrationResult:
     """Seed a person's registration: name + visit details + one face image.
