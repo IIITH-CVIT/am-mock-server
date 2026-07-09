@@ -28,6 +28,14 @@ def test_face_vector_correct_dimension_reaches_search(client):
     })
     assert resp.status_code == 200  # reaches the search, whatever the match outcome
 
+def test_face_vector_dlib_dimension_reaches_search(client):
+    # 128-dim dlib vectors are a valid face query too (they search the dlib gallery)
+    resp = client.post("/api/v1/identify/", data={
+        "type": "face",
+        "face_vector": json.dumps([0.1] * 128),
+    })
+    assert resp.status_code == 200
+
 def test_vector_exceeding_max_length_returns_400(client):
     resp = client.post("/api/v1/identify/", data={
         "type": "fingerprint",

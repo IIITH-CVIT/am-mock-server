@@ -6,6 +6,23 @@ import onnxruntime
 
 from app.core.config import settings
 
+# dlib + its bundled model weights are imported lazily so the server still boots
+# (with only the mobilefacenet backend) if the dlib wheel isn't installed — e.g.
+# in the unit-test environment, which has no dlib. When present, they give us the
+# second, dlib backend used to enroll a 128-dim descriptor alongside the 512-dim
+# mobilefacenet one. See DlibEngine below.
+try:
+    import dlib as _dlib
+    import face_recognition_models as _face_rec_models
+except ModuleNotFoundError:  # pragma: no cover - depends on install profile
+    _dlib = None
+    _face_rec_models = None
+
+# dlib ResNet descriptors are always 128-dim (raw, not L2-normalized). Exposed as
+# a module constant so identify() can recognize a dlib query by its length without
+# needing a live DlibEngine instance.
+DLIB_EMBEDDING_DIM = 128
+
 # ArcFace/MobileFaceNet 112x112 reference landmarks, used to warp a detected
 # face into a canonical frontal pose before embedding.
 _REF_LANDMARKS = np.array(
@@ -238,4 +255,84 @@ class FaceEngine:
         return vector.tolist()
 
 
+class DlibUnavailableError(RuntimeError):
+    """Raised when a DlibEngine is requested but the dlib packages aren't installed."""
+
+
+class DlibEngine:
+    """Detects a face (dlib HOG) and computes a 128-dim descriptor (dlib ResNet).
+
+    Mirrors am-master-server's DlibBackend and am-mock-client's DlibFaceDetector +
+    DlibEmbedder exactly: HOG detection with number_of_times_to_upsample=1, a
+    5-point shape predictor for alignment, and a raw (NOT L2-normalized) 128-dim
+    ResNet descriptor. Enrolling this alongside the mobilefacenet embedding is what
+    lets a client using the default dlib pairing match against this server.
+
+    The two .dat weight files ship inside the `face_recognition_models` pip
+    package (not ./models), so nothing extra needs to be bind-mounted.
+    """
+
+    DIM = DLIB_EMBEDDING_DIM
+
+    def __init__(self, num_upsamples: int = 1, num_jitters: int = 1, threshold: float = 0.3) -> None:
+        if _dlib is None or _face_rec_models is None:
+            raise DlibUnavailableError(
+                "The dlib backend needs the 'dlib' and 'face_recognition_models' "
+                "packages, which aren't installed. Rebuild the image so the "
+                "Containerfile installs them, or accept mobilefacenet-only enrollment."
+            )
+        self.model_name = "dlib"
+        self.embedding_dim = self.DIM
+        self.num_upsamples = num_upsamples
+        self.num_jitters = num_jitters
+        self.threshold = threshold
+
+        models_dir = os.path.join(os.path.dirname(_face_rec_models.__file__), "models")
+        resnet_path = os.path.join(models_dir, "dlib_face_recognition_resnet_model_v1.dat")
+        predictor_path = os.path.join(models_dir, "shape_predictor_5_face_landmarks.dat")
+        for label, path in (
+            ("dlib face-recognition ResNet weights", resnet_path),
+            ("dlib 5-point shape predictor", predictor_path),
+        ):
+            if not os.path.exists(path):
+                raise DlibUnavailableError(
+                    f"{label} not found at {path!r}. These ship inside the "
+                    f"'face_recognition_models' package; reinstall it "
+                    f"(pip install --force-reinstall face_recognition_models)."
+                )
+
+        self._face_encoder = _dlib.face_recognition_model_v1(resnet_path)
+        self._shape_predictor = _dlib.shape_predictor(predictor_path)
+        self._detector = _dlib.get_frontal_face_detector()
+
+    def embed(self, image_bytes: bytes) -> list[float]:
+        arr = np.frombuffer(image_bytes, dtype=np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if img is None:
+            raise ValueError("could not decode image")
+
+        rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        dets, scores, _ = self._detector.run(rgb, self.num_upsamples, self.threshold)
+        if not dets:
+            raise NoFaceDetectedError("no face detected in image")
+
+        best = int(np.argmax(scores))
+        shape = self._shape_predictor(rgb, dets[best])
+        descriptor = self._face_encoder.compute_face_descriptor(rgb, shape, self.num_jitters)
+        # RAW descriptor — do NOT L2-normalize (matches DlibBackend's raw-L2 cutoff).
+        return np.asarray(descriptor, dtype=np.float32).tolist()
+
+
 face_engine = FaceEngine()
+
+# The dlib engine is optional: if the dlib packages aren't installed the server
+# still runs, enrolling only the mobilefacenet embedding. When it loads, every
+# registration gets BOTH a 512-dim mobilefacenet and a 128-dim dlib embedding.
+try:
+    dlib_engine: DlibEngine | None = DlibEngine()
+except DlibUnavailableError as exc:
+    dlib_engine = None
+    print(
+        f"WARNING: dlib backend unavailable — registrations will store only the "
+        f"mobilefacenet (512-dim) embedding, not the dlib (128-dim) one. Reason: {exc}"
+    )

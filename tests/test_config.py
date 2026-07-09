@@ -10,6 +10,7 @@ def test_dataclass_defaults_match_config_yaml():
 
     assert defaults.database.path == yaml_values["database"]["path"]
     assert defaults.identify.face_recognition_threshold == yaml_values["identify"]["face_recognition_threshold"]
+    assert defaults.identify.dlib_face_recognition_threshold == yaml_values["identify"]["dlib_face_recognition_threshold"]
     assert defaults.identify.fingerprint_recognition_threshold == yaml_values["identify"]["fingerprint_recognition_threshold"]
     assert defaults.identify.default_n == yaml_values["identify"]["default_n"]
     assert defaults.models.face_detector_score_threshold == yaml_values["models"]["face_detector_score_threshold"]

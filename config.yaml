@@ -17,7 +17,10 @@ models:
   face_detector_score_threshold: 0.5
 
 identify:
-  # max normalized-L2 distance between query and stored vector to count as a match
-  face_recognition_threshold: 0.8
+  # Max L2 distance between query and stored vector to count as a match.
+  # Two face cutoffs because the two models live in different vector spaces;
+  # the query's dimension picks which one applies:
+  face_recognition_threshold: 0.8        # mobilefacenet (512-dim, L2-normalized)
+  dlib_face_recognition_threshold: 0.6   # dlib (128-dim, raw descriptor)
   fingerprint_recognition_threshold: 0.7
   default_n: 10

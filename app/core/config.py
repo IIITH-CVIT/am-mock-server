@@ -25,8 +25,15 @@ class ModelsConfig:
 
 @dataclass
 class IdentifyConfig:
-    # max normalized-L2 distance between query and stored vector to count as a match
+    # Max L2 distance between query and stored vector to count as a match.
+    # Each face model has its own cutoff because they live in different spaces:
+    #   - face_recognition_threshold: mobilefacenet (512-dim, L2-normalized) — mirrors
+    #     am-master-server's auraface_threshold.
+    #   - dlib_face_recognition_threshold: dlib (128-dim, raw descriptor) — mirrors
+    #     am-master-server's dlib_threshold. The query dimension (128 vs 512) selects
+    #     which cutoff and which distance metric identify() uses.
     face_recognition_threshold: float = 0.8
+    dlib_face_recognition_threshold: float = 0.6
     fingerprint_recognition_threshold: float = 0.7
     default_n: int = 10
 

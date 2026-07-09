@@ -7,12 +7,34 @@ Celery, S3/MinIO, Qdrant). Data is stored in a local SQLite file instead.
 ## Features
 
 - **Registration** — capture a name, visit date, time slot, ticket category,
-  and one face photo. The face is embedded on the spot; only the name, visit
-  details, and embedding are persisted (the image bytes are discarded).
+  and one face photo. The face is embedded on the spot with **two face models**
+  (see below); only the name, visit details, and the two embeddings are
+  persisted (the image bytes are discarded).
 - **Identify** — look up a registration by ID, or by face vector (nearest
-  stored embedding within a configurable distance threshold).
+  stored embedding within a configurable distance threshold). Works with either
+  face model.
 - **Web UI** — a small registration form at `/` with webcam capture (falls
   back to file upload), for exercising the API by hand.
+
+## Two face models, enrolled together
+
+Every registration stores **two** face embeddings computed from the same photo:
+
+| Model | Vector size | How the client sends it | Match cutoff |
+|---|---|---|---|
+| **dlib** | 128 numbers | client's default (`config.yaml`) | distance < `0.6` |
+| **YuNet + MobileFaceNet** | 512 numbers | client's alternate (`config.yunet.yaml`) | distance < `0.8` |
+
+This means the matching mock **client** works out of the box whichever model it's
+set to: its default is dlib, and it can switch to YuNet+MobileFaceNet by changing
+one setting. On identify, the server looks at how many numbers the incoming vector
+has (128 vs 512) and searches the matching gallery automatically. You don't pick a
+model in the API — the vector's size does it for you.
+
+> The two models live in **different number spaces**, so you can't compare a dlib
+> vector against a MobileFaceNet one. That's fine — the server keeps them separate
+> and never mixes them. It just means: whatever model the client registered with
+> is the model it must identify with. Since registration enrols both, either works.
 
 Fingerprint identification (`type=fingerprint`) is wired into the schema and
 `/api/v1/identify/` endpoint for API-shape compatibility with the real server,
@@ -22,6 +44,11 @@ return "no match found".
 ## Running
 
 **Prerequisites:** a Linux host with `sudo` and internet access on the first run (to install Podman and build the image). Nothing else to install by hand — Python 3.13 and every library live inside the container, and the ONNX models are bundled in `./models`. (macOS works too via `brew`, but needs `podman machine start` first.)
+
+> **First build takes ~10-15 minutes.** The dlib model compiles from source inside
+> the image (the Containerfile installs the C++ build tools it needs). This happens
+> **once** — later rebuilds after code changes are fast because the compile is cached.
+> Just let the first `./run.sh` run to completion.
 
 ```bash
 ./run.sh
@@ -61,7 +88,7 @@ Open **http://localhost:8000** in a browser and fill the form:
 | Ticket category | `general` | ≥ 5 characters |
 | Photo | webcam capture, or the file-upload fallback | a clear front-facing face |
 
-Submit. The server detects the face, computes a 512-dim embedding, and stores the registration — you get back a `registration_id`. If it reports **"no face detected"**, use a clearer, front-facing photo.
+Submit. The server detects the face, computes **both** embeddings (128-dim dlib + 512-dim MobileFaceNet), and stores the registration — you get back a `registration_id` and a message saying how many embeddings were stored. If it reports **"no face detected"**, use a clearer, front-facing photo.
 
 ### 2. Confirm it was stored
 
@@ -77,11 +104,11 @@ Lists everyone registered, with their stored vector metadata (kind / model / dim
 curl -X POST http://localhost:8000/api/v1/identify/ -F "type=id" -F "id=<registration_id>"
 ```
 
-**By face** — this route matches on a 512-dim *vector*, not an image (the server vector-searches; it does not re-embed here). Two easy ways to produce the vector from a photo:
-- **Mock client** (the realistic edge-device flow): `client.py --config config.mock-server.yaml --server photo.jpg` — see the client README, and `## Running end-to-end with the mock client` below.
-- **Inside the container**: `podman compose exec mock-server python -m app.cli_identify /path/to/photo.jpg` — embeds the photo and calls identify for you.
+**By face** — this route matches on a face *vector*, not an image (the server vector-searches; it does not re-embed here). The vector is either 128 numbers (dlib) or 512 numbers (MobileFaceNet); the server figures out which gallery to search from the size. Two easy ways to produce a vector from a photo:
+- **Mock client** (the realistic edge-device flow): `client.py --server photo.jpg` (default dlib), or add `--config config.yunet.yaml` for the 512-dim model — see the client README, and `## Running end-to-end with the mock client` below.
+- **Inside the container**: `podman compose exec mock-server python -m app.cli_identify /path/to/photo.jpg` — embeds the photo (with MobileFaceNet) and calls identify for you.
 
-A match returns the person's details with `distance` (lower = better; under `0.8` counts as a match) and `confidence`.
+A match returns the person's details with `distance` (lower = better; under the model's cutoff — `0.6` for dlib, `0.8` for MobileFaceNet — counts as a match) and `confidence`.
 
 ### 4. Inspect the database directly
 
@@ -155,8 +182,10 @@ List/fetch registrations, including visit details and stored vector metadata
 
 - `type=id`, `id=<registration_id>` — direct lookup.
 - `type=face`, `face_vector=<JSON array or comma-separated floats>` — nearest
-  stored face embedding (512-dim, MobileFaceNet) within
-  `identify.face_recognition_threshold`. Must exactly be 512-dimensions, else a `400` error is thrown
+  stored face embedding. The vector must be either **128-dim** (dlib, matched
+  within `identify.dlib_face_recognition_threshold`) or **512-dim** (MobileFaceNet,
+  matched within `identify.face_recognition_threshold`); any other length returns a
+  `400` error naming the two accepted sizes.
 - `type=fingerprint` — accepted but always returns "no match found" (see
   above). Vectors longer than 4096 elements are rejected with `400`
   regardless of type.
@@ -186,10 +215,16 @@ models:
   face_detector_score_threshold: 0.5
 
 identify:
-  face_recognition_threshold: 0.8
+  face_recognition_threshold: 0.8        # MobileFaceNet (512-dim) match cutoff
+  dlib_face_recognition_threshold: 0.6   # dlib (128-dim) match cutoff
   fingerprint_recognition_threshold: 0.7
   default_n: 10
 ```
+
+The YuNet + MobileFaceNet models are bind-mounted from `./models`. The **dlib**
+model has no path here on purpose: its weights ship inside the
+`face_recognition_models` Python package (installed into the image), not in
+`./models`, so there's nothing extra to mount.
 
 `config.yaml` is the single source of truth for all settings. If it's missing or unreadable at startup (e.g. `CONFIG_PATH` misconfigured, bind mount missing), the server logs a `WARNING` and falls back to the built-in defaults in `app/core/config.py`, and those defaults are kept in sync with the shipped `config.yaml` and covered by a test (`tests/test_config.py`), but if you ever
 see that warning in the logs, something is wrong with your bind mount, not your config values.
@@ -197,9 +232,20 @@ see that warning in the logs, something is wrong with your bind mount, not your 
 ## Face pipeline
 
 [app/core/face_engine.py](app/core/face_engine.py) mirrors the real server's
-pipeline: YuNet (ONNX) detects a face and 5 landmarks, the face is aligned into
-a 112x112 ArcFace pose, and MobileFaceNet (ONNX) produces a normalized 512-dim
-embedding. Both models run via `onnxruntime` (CPU).
+**two** identification backends, and registration runs both on the same photo:
+
+- **MobileFaceNet (`FaceEngine`)** — YuNet (ONNX) detects a face and 5 landmarks,
+  the face is aligned into a 112x112 ArcFace pose, and MobileFaceNet (ONNX)
+  produces a normalized 512-dim embedding. Both models run via `onnxruntime` (CPU).
+- **dlib (`DlibEngine`)** — dlib's HOG detector finds the face, a 5-point shape
+  predictor aligns it, and dlib's ResNet produces a raw (not normalized) 128-dim
+  descriptor. These weights ship inside the `face_recognition_models` package, so
+  dlib is compiled into the image (see the first-build note under `## Running`).
+  This is byte-for-byte the same pipeline the mock client uses for its default
+  dlib model, so the vectors match exactly.
+
+If the dlib packages somehow aren't installed, the server still boots and
+registers — it just stores only the MobileFaceNet embedding and logs a warning.
 
 The detector is expected to be a YuNet export with per-stride outputs named `cls_{8,16,32}`, `obj_{8,16,32}`, `bbox_{8,16,32}`, `kps_{8,16,32}`. This is validated at startup. If you swap in a different YuNet export (e.g. a differently-converted ONNX file) and the container fails to start with a `RuntimeError` mentioning "missing expected output tensor", that's this check
 —point `models.face_detector_path` in `config.yaml` at a model exported with the standard YuNet output naming.
@@ -217,7 +263,7 @@ app/
   core/
     config.py       # loads config.yaml into typed Settings
     database.py      # SQLite schema + queries
-    face_engine.py    # YuNet detection + MobileFaceNet embedding
+    face_engine.py    # FaceEngine (YuNet+MobileFaceNet) + DlibEngine (dlib)
   routers/
     registrations.py # register / list / get
     identify.py       # id / face / fingerprint lookup
@@ -228,7 +274,7 @@ models/                # ONNX weights (bind-mounted)
 data/                  # SQLite DB (bind-mounted, gitignored)
 config.yaml
 compose.yml
-Dockerfile
+Containerfile
 run.sh
 query_db.sh
 ```
@@ -249,13 +295,20 @@ curl http://localhost:8000/health           # -> {"status":"ok"}
 **3. Set up the client** (`am-mock-client`):
 ```bash
 cd ../am-mock-client
-./setup.sh                                   # native venv, light deps (no dlib)
+./setup.sh                                   # native venv; default includes dlib (~10-15 min compile)
 ```
 
 **4. Identify** with a photo of the same person:
 ```bash
-.venv/bin/python client.py --config config.mock-server.yaml --server <photo.jpg>
-# -> >>> Recognised: <name>     (distance comfortably under 0.8)
+.venv/bin/python client.py --server <photo.jpg>
+# -> >>> Recognised: <name>     (distance comfortably under the match cutoff)
 ```
 
-The client ships **`config.mock-server.yaml`** (yunet + mobilefacenet, 512-dim, `localhost:8000`) precisely for this test — do **not** use its default `config.yaml`, which is the dlib / real-`am-master-server` pairing and would silently never match here. Full client docs: `am-mock-client/README.md`.
+That uses the client's **default dlib model**, which now works against this mock
+because registration enrolled a dlib vector too. To use the 512-dim
+YuNet+MobileFaceNet model instead, add `--config config.yunet.yaml`:
+```bash
+.venv/bin/python client.py --config config.yunet.yaml --server <photo.jpg>
+```
+Both talk to this same server on `localhost:8000`. Full client docs:
+`am-mock-client/README.md`.
