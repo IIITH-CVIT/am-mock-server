@@ -54,8 +54,8 @@ return "no match found".
 ./run.sh
 ```
 
-`run.sh` bootstraps the toolchain: if `podman` or a compose provider (`podman-compose`) isn't installed, it installs them via the host package manager (`dnf`/`yum` on Fedora/RHEL, `apt` on Debian/Ubuntu, also `zypper`/`pacman`/`brew`) — this needs `sudo` and network access. It's idempotent: if everything's already present it just builds and starts the stack (`podman compose up --build`). The `Containerfile` uses standard Docker-compatible build syntax, so it also builds fine under plain Docker (`docker compose up --build`) if you prefer. The
-server listens on `http://localhost:8000`:
+`run.sh` bootstraps the toolchain: if `podman` isn't installed, it installs it via the host package manager (`dnf`/`yum` on Fedora/RHEL, `apt` on Debian/Ubuntu, also `zypper`/`pacman`/`brew`) — this needs `sudo` and network access. It's idempotent: if `podman` is already present it just builds the image and (re)starts the container (`podman build` + `podman run`, replacing any previous container of the same name). There's no compose provider or Podman API socket involved as a single container doesn't need one, so `run.sh` talks to `podman` directly. The
+`Containerfile` uses standard Docker-compatible build syntax, so it also builds fine under plain Docker (`docker build` / `docker run`) if you prefer. The server listens on `http://localhost:8000`:
 
 - `/` — registration web UI
 - `/docs` — interactive API docs (Swagger UI)
@@ -65,8 +65,7 @@ server listens on `http://localhost:8000`:
 `./data` (the SQLite DB) is bind-mounted read-write so it survives container
 rebuilds/restarts.
 
-The Docker image bakes in the application code, so after changing files under
-`app/` you need to rebuild (`./run.sh` again) to pick up the changes.
+The container image bakes in the application code, so after changing files under `app/` you need to rebuild (`./run.sh` again) to pick up the changes.
 
 ### Concurrency
 
@@ -106,7 +105,7 @@ curl -X POST http://localhost:8000/api/v1/identify/ -F "type=id" -F "id=<registr
 
 **By face** — this route matches on a face *vector*, not an image (the server vector-searches; it does not re-embed here). The vector is either 128 numbers (dlib) or 512 numbers (MobileFaceNet); the server figures out which gallery to search from the size. Two easy ways to produce a vector from a photo:
 - **Mock client** (the realistic edge-device flow): `client.py --server photo.jpg` (default dlib), or add `--config config.yunet.yaml` for the 512-dim model — see the client README, and `## Running end-to-end with the mock client` below.
-- **Inside the container**: `podman compose exec mock-server python -m app.cli_identify /path/to/photo.jpg` — embeds the photo (with MobileFaceNet) and calls identify for you.
+- **Inside the container**: `podman exec mock-server python -m app.cli_identify /path/to/photo.jpg` — embeds the photo (with MobileFaceNet) and calls identify for you.
 
 A match returns the person's details with `distance` (lower = better; under the model's cutoff — `0.6` for dlib, `0.8` for MobileFaceNet — counts as a match) and `confidence`.
 
@@ -149,7 +148,9 @@ identical to a genuine no-match; it's a `400` now.
 
 - **Dockerfile → Containerfile, Podman migration**: see `## Running` below.
 
-- **Bind mounts failed under rootless Podman on SELinux-enforcing hosts (Fedora/RHEL)**: without an SELinux relabel suffix the container gets permission-denied reading `./config.yaml`/`./models` and writing `./data`. Fixed: `compose.yml` now carries `:Z` (private relabel) on each bind mount (`:ro,Z` for the read-only ones). It's a no-op on non-SELinux hosts (plain Docker on Ubuntu), so it's safe cross-platform; switch to `:z` if you ever share a mount between containers.
+- **compose dropped in favor of plain `podman build`/`podman run`**: this project is a single container with no inter-container networking or dependency ordering, so `podman-compose`/`podman compose` (and the Podman API socket it talks to) added a toolchain dependency without buying anything. `run.sh` now calls `podman build` and `podman run` directly.
+
+- **Bind mounts failed under rootless Podman on SELinux-enforcing hosts (Fedora/RHEL)**: without an SELinux relabel suffix the container gets permission-denied reading `./config.yaml`/`./models` and writing `./data`. Fixed: the bind mounts in `run.sh` carry `:Z` (private relabel) on each (`:ro,Z` for the read-only ones). It's a no-op on non-SELinux hosts (plain Docker on Ubuntu), so it's safe cross-platform; switch to `:z` if you ever share a mount between containers.
 
 ## API
 
@@ -273,7 +274,6 @@ app/
 models/                # ONNX weights (bind-mounted)
 data/                  # SQLite DB (bind-mounted, gitignored)
 config.yaml
-compose.yml
 Containerfile
 run.sh
 query_db.sh

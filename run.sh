@@ -4,10 +4,9 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
 # ─────────────────────────────────────────────────────────────
-# Launch the mock server under Podman (team standard — not Docker),
-# bootstrapping the toolchain if it's missing. Safe to re-run: if
-# podman + a compose provider are already present this just builds
-# and starts the stack. Installs require sudo and network access.
+# Launch the mock server under Podman, bootstrapping the toolchain 
+# if it's missing. 
+# Installs require sudo and network access.
 # ─────────────────────────────────────────────────────────────
 
 log()  { printf '\033[1;34m[run.sh]\033[0m %s\n' "$*"; }
@@ -33,61 +32,37 @@ install_pkg() {
     eval "$cmd $pkg"
 }
 
-# Return the working compose provider ("podman compose" or "podman-compose"), or non-zero.
-detect_compose() {
-    if   podman compose version   >/dev/null 2>&1; then echo "podman compose"
-    elif command -v podman-compose >/dev/null 2>&1; then echo "podman-compose"
-    else return 1
-    fi
-}
-
 # 1) Podman itself
 if command -v podman >/dev/null 2>&1; then
     log "podman present: $(podman --version)"
 else
-    warn "podman not found — installing it (this needs sudo)."
+    warn "podman not found. Installing it (this needs sudo)."
     install_pkg podman || die "No supported package manager found. Install 'podman' manually, then re-run."
     command -v podman >/dev/null 2>&1 || die "podman install did not take effect. Open a new shell and re-run."
     log "podman installed: $(podman --version)"
 fi
 
-# 2) A compose provider for podman (podman-compose). Install it if absent.
-if COMPOSE="$(detect_compose)"; then
-    log "compose provider: $COMPOSE"
-else
-    warn "no podman compose provider found — installing podman-compose."
-    if ! install_pkg podman-compose; then
-        # Distro doesn't package it (or no pkg manager): fall back to pip.
-        warn "package manager couldn't provide podman-compose; trying pip."
-        command -v pip3 >/dev/null 2>&1 || install_pkg python3-pip || true
-        command -v pip3 >/dev/null 2>&1 || die "Need pip3 or a packaged podman-compose. Install 'podman-compose' manually and re-run."
-        pip3 install --user podman-compose || die "pip could not install podman-compose. Install it manually and re-run."
-    fi
-    COMPOSE="$(detect_compose)" || die "podman-compose still not available (a new shell may be needed for PATH changes). Install it manually and re-run."
-    log "compose provider: $COMPOSE"
+mkdir -p data
+
+IMAGE=mock-server
+NAME=mock-server
+
+log "Building image ($IMAGE)..."
+podman build -f Containerfile -t "$IMAGE" .
+
+# Remove any previous container with the same name so re-runs don't collide
+if podman container exists "$NAME" 2>/dev/null; then
+    log "Removing existing container '$NAME' ..."
+    podman rm -f "$NAME" >/dev/null
 fi
 
-# 3) Podman's user socket must be running — compose talks to it, not a
-#    real docker daemon, and the "docker daemon" error is misleading.
-ensure_podman_socket() {
-    export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
-    if systemctl --user is-active --quiet podman.socket 2>/dev/null; then
-        log "podman.socket already active"
-        return 0
-    fi
-    warn "podman.socket not active — starting it."
-    systemctl --user start podman.socket || die "Could not start podman.socket. Try 'systemctl --user start podman.socket' manually."
-    systemctl --user enable podman.socket >/dev/null 2>&1 || true
-    systemctl --user is-active --quiet podman.socket || die "podman.socket still not active after start attempt."
-    log "podman.socket started"
-}
-ensure_podman_socket
-
-mkdir -p data
-log "Building and starting the mock server (http://localhost:8000) ..."
-exec $COMPOSE up --build
-
-mkdir -p data
-
-log "Building and starting the mock server (http://localhost:8000) ..."
-exec $COMPOSE up --build
+log "Starting container ($NAME) on http://localhost:8000 ..."
+exec podman run \
+    --name "$NAME" \
+    -p 8000:8000 \
+    -v "$(pwd)/config.yaml:/app/config.yaml:ro,Z" \
+    -v "$(pwd)/models:/app/models:ro,Z" \
+    -v "$(pwd)/data:/app/data:Z" \
+    -e CONFIG_PATH=/app/config.yaml \
+    --restart unless-stopped \
+    "$IMAGE"
