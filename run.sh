@@ -67,6 +67,26 @@ else
     log "compose provider: $COMPOSE"
 fi
 
+# 3) Podman's user socket must be running — compose talks to it, not a
+#    real docker daemon, and the "docker daemon" error is misleading.
+ensure_podman_socket() {
+    export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+    if systemctl --user is-active --quiet podman.socket 2>/dev/null; then
+        log "podman.socket already active"
+        return 0
+    fi
+    warn "podman.socket not active — starting it."
+    systemctl --user start podman.socket || die "Could not start podman.socket. Try 'systemctl --user start podman.socket' manually."
+    systemctl --user enable podman.socket >/dev/null 2>&1 || true
+    systemctl --user is-active --quiet podman.socket || die "podman.socket still not active after start attempt."
+    log "podman.socket started"
+}
+ensure_podman_socket
+
+mkdir -p data
+log "Building and starting the mock server (http://localhost:8000) ..."
+exec $COMPOSE up --build
+
 mkdir -p data
 
 log "Building and starting the mock server (http://localhost:8000) ..."
