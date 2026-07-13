@@ -84,7 +84,7 @@ Open **http://localhost:8000** in a browser and fill the form:
 | Full name | `Alice Kumar` | ≥ 5 characters |
 | Date of visit | `2026-07-08` | `YYYY-MM-DD` |
 | Time slot | `10:00` | `HH:MM` |
-| Ticket category | `general` | ≥ 5 characters |
+| Ticket category | `general` | Choose from dropdown |
 | Photo | webcam capture, or the file-upload fallback | a clear front-facing face |
 
 Submit. The server detects the face, computes **both** embeddings (128-dim dlib + 512-dim MobileFaceNet), and stores the registration — you get back a `registration_id` and a message saying how many embeddings were stored. If it reports **"no face detected"**, use a clearer, front-facing photo.
