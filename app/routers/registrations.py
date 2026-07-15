@@ -1,6 +1,5 @@
 import uuid
-from datetime import date, time
-from typing import Literal
+from datetime import date
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 
@@ -18,20 +17,22 @@ router = APIRouter(prefix="/api/v1/registrations", tags=["registrations"])
 
 MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024
 
+DEFAULT_TIMESLOT = "10:00"
+DEFAULT_TICKET_CATEGORY = "general"
+
 @router.post("/register", response_model=RegistrationResult, summary="Register")
 def register(
     full_name: str = Form(..., min_length = 5, max_length = 200),
-    date_of_visit: str = Form(..., description="ISO date, e.g. 2026-07-01"),
-    timeslot: str = Form(..., description="ISO time, e.g. 10:00 or 10:00:00"),
-    ticket_category: Literal["general", "vip", "vvip", "staff"] = Form(...),
     image: UploadFile = File(...),
 ) -> RegistrationResult:
-    """Seed a person's registration: name + visit details + one face image.
+    """Seed a person's registration: name + one face image.
 
     Detects the face and computes one embedding from the photo — via whichever
     backend `models.embedder_model` selects (sface or auraface, see
     app/core/face_engine.py). Only the name, visit details, and the vector are
-    persisted; the image bytes are discarded.
+    persisted; the image bytes are discarded. Visit details (date, timeslot,
+    ticket category) are not client input — the date is stamped as today, and
+    timeslot/ticket category are fixed defaults.
     """
 
     if not image.content_type or not image.content_type.startswith("image/"):
@@ -40,11 +41,9 @@ def register(
             detail = f"Expected an image file, got content_type = {image.content_type!r}",
         )
 
-    try:
-        date.fromisoformat(date_of_visit)
-        time.fromisoformat(timeslot)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=f"invalid date/time format: {exc}")
+    date_of_visit = date.today().isoformat()
+    timeslot = DEFAULT_TIMESLOT
+    ticket_category = DEFAULT_TICKET_CATEGORY
 
     image_bytes = image.file.read(MAX_IMAGE_SIZE_BYTES + 1)
     if len(image_bytes) > MAX_IMAGE_SIZE_BYTES:

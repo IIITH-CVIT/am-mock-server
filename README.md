@@ -74,10 +74,10 @@ Open **http://localhost:8000** in a browser and fill the form:
 | Field | Example | Rule |
 |---|---|---|
 | Full name | `Alice Kumar` | ≥ 5 characters |
-| Date of visit | `2026-07-08` | `YYYY-MM-DD` |
-| Time slot | `10:00` | `HH:MM` |
-| Ticket category | `general` | Choose from dropdown |
 | Photo | webcam capture, or the file-upload fallback | a clear front-facing face |
+
+`date_of_visit`, `timeslot`, and `ticket_category` aren't collected from the
+form — the server stamps them itself (today's date, and fixed defaults).
 
 Submit. The server detects the face, computes the configured embedding (128-dim sface by default), and stores the registration — you get back a `registration_id` and a message naming the model and dimension stored. If it reports **"no face detected"**, use a clearer, front-facing photo.
 
@@ -130,7 +130,7 @@ identical to a genuine no-match; it's a `400` now.
 
 - **No global exception handler**: any unhandled exception previously returned Starlette's raw plain-text 500 (which broke the web UI's `JSON.parse`). A global handler now logs the full traceback server-side and returns clean JSON `{"detail": "internal server error"}`.
 
-- **`full_name`/`ticket_category` had no length limits; `GET /registrations/` had no `limit` cap**, now `5-200` characters each and `limit` capped at 500, both enforced with FastAPI's own `422` validation.
+- **`full_name` had no length limits; `GET /registrations/` had no `limit` cap**, now `5-200` characters and `limit` capped at 500, both enforced with FastAPI's own `422` validation. (`ticket_category` is no longer client input at all — see `## API` below.)
 
 - **Config defaults drifted from `config.yaml`**: in-code dataclass defaults now match the shipped `config.yaml` exactly, and a missing config file now logs a `WARNING` at startup instead of silently using different values.
 
@@ -153,13 +153,16 @@ identical to a genuine no-match; it's a `400` now.
 | field             | type | notes                                |
 |-------------------|------|---------------------------------------|
 | `full_name`       | str  | required, 5 - 200 characters          |
-| `date_of_visit`   | str  | required, ISO date (`YYYY-MM-DD`)     |
-| `timeslot`        | str  | required, ISO time (`HH:MM[:SS]`)     |
-| `ticket_category` | str  | required, 5 - 200 characters          |
 | `image`           | file | required, one face photo  , `image/*`, max 10MB|
 
+`date_of_visit`, `timeslot`, and `ticket_category` are not client input —
+they're always set server-side: `date_of_visit` to the current date at
+registration time, `timeslot` fixed to `"10:00"`, and `ticket_category` fixed
+to `"general"` (see `DEFAULT_TIMESLOT` / `DEFAULT_TICKET_CATEGORY` in
+`app/routers/registrations.py`).
+
 Returns `{ registration_id, status, message }`. 422 if no face is detected in
-the image; 400 if the date/time can't be parsed; 415 if the uploaded file's content-type isn't `image/*`; 413 if it exceeds 10MB.
+the image; 415 if the uploaded file's content-type isn't `image/*`; 413 if it exceeds 10MB.
 
 Detection + embedding runs synchronously on CPU (~a few hundred ms per image depending on hardware), so a single `register` call blocks for that long. This mirrors the real server's own per-request latency for this step, it isn't mock-specific overhead.
 

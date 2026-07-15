@@ -8,13 +8,9 @@ const uploadLabel = document.getElementById("uploadLabel");
 const fileUpload = document.getElementById("fileUpload");
 const form = document.getElementById("registrationForm");
 const resultBox = document.getElementById("resultBox");
-const dateInput = document.getElementById("dateOfVisit");
 
 let stream = null;
 let photoBlob = null;
-
-dateInput.value = new Date().toISOString().split("T")[0];
-dateInput.min = dateInput.value;
 
 async function startCamera() {
     try {
@@ -95,7 +91,6 @@ form.addEventListener("reset", () => {
     retakePhotoBtn.style.display = "none";
     uploadLabel.style.display = "inline-flex";
     resultBox.style.display = "none";
-    dateInput.value = new Date().toISOString().split("T")[0];
 });
 
 form.addEventListener("submit", async (event) => {
@@ -108,9 +103,6 @@ form.addEventListener("submit", async (event) => {
 
     const formData = new FormData();
     formData.append("full_name", document.getElementById("fullName").value);
-    formData.append("date_of_visit", dateInput.value);
-    formData.append("timeslot", document.getElementById("timeslot").value);
-    formData.append("ticket_category", document.getElementById("ticketCategory").value);
     formData.append("image", photoBlob, "photo.jpg");
 
     const submitBtn = document.getElementById("submitBtn");
