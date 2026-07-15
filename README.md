@@ -262,9 +262,13 @@ mount. To run the suite from the host, point `CONFIG_PATH` at a copy of
 directory on disk:
 
 ```bash
-pytest tests/ -v                        # inside the container (or after the bind mount is set up)
-CONFIG_PATH=/path/to/host-config.yaml pytest tests/ -v   # from the host
+python -m pytest tests/ -v                        # inside the container (or after the bind mount is set up)
+CONFIG_PATH=/path/to/host-config.yaml python -m pytest tests/ -v   # from the host
 ```
+
+Use `python -m pytest`, not a bare `pytest` — the `-m` form adds the repo root
+to `sys.path` so `import app...` resolves; a bare `pytest` invocation doesn't,
+and fails every test file with `ModuleNotFoundError: No module named 'app'`.
 
 Lint (also enforced by `tests/test_lint.py`, so a `pytest` run catches lint
 regressions too):

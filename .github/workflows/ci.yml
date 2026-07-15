@@ -65,4 +65,4 @@ jobs:
       - name: Run pytest
         env:
           CONFIG_PATH: ci-config.yaml
-        run: pytest tests/ -v
+        run: python -m pytest tests/ -v
