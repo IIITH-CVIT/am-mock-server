@@ -61,18 +61,6 @@ Go to the terminal and run the following command:
 curl -X POST http://localhost:8000/api/v1/identify/ -F "type=id" -F "id=<registration_id>"
 ```
 
-**By face** — the identify route matches on a face *vector*, not an image. The easiest way to produce one from a photo, right inside the container:
-Go to the terminal and run the following command: 
-
-```bash
-podman exec mock-server python -m app.cli_identify /path/to/photo.jpg
-```
-
-A match returns the person's details with a `distance` (lower = better) and
-`confidence`.
-
-> For the realistic edge-device flow (producing the vector on a separate client), see the `am-mock-client` repo and its `tutorial.md`.
-
 ---
 
 That's it, and you're running. For everything else (full API, config options, the face pipeline, known issues), see [README.md](README.md).
