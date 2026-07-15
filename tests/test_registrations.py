@@ -1,12 +1,14 @@
 import asyncio
-import time 
-import pytest 
-from httpx import AsyncClient, ASGITransport 
+import time
+
+import pytest
+from httpx import ASGITransport, AsyncClient
+
 
 @pytest.mark.anyio 
 async def test_register_does_not_block_event_loop(monkeypatch):
-    from app.core import face_engine as fe_module 
-    from app.main import app 
+    from app.core import face_engine as fe_module
+    from app.main import app
 
     def slow_embed(image_bytes):
         time.sleep(1.0)

@@ -4,12 +4,12 @@ from typing import Literal, Optional
 import numpy as np
 from fastapi import APIRouter, Form, HTTPException
 
-MAX_VECTOR_LENGTH = 4096
-
 from app.core.config import settings
 from app.core.database import get_conn, get_registration, list_vectors_by_kind
-from app.schemas.identify import IdentifyResponse
 from app.core.face_engine import face_engine
+from app.schemas.identify import IdentifyResponse
+
+MAX_VECTOR_LENGTH = 4096
 
 router = APIRouter(prefix="/api/v1/identify", tags=["identify"])
 
@@ -41,7 +41,8 @@ def _normalized_l2_distance(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.linalg.norm(a / a_norm - b / b_norm))
 
 def _find_best_match(kind: str, query: list[float], vector_type: Optional[str]):
-    """Returns (registration, distance) for the closest stored vector; smallest normalized L2 distance wins."""
+    """Returns (registration, distance) for the closest stored vector; smallest normalized
+    L2 distance wins."""
     query_arr = np.array(query, dtype=np.float32)
     with get_conn() as conn:
         candidates = list_vectors_by_kind(conn, kind=kind, dim=len(query), source=vector_type)

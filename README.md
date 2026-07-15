@@ -246,6 +246,33 @@ pixels, it only vector-searches whatever the client submits.
 - `python -m app.cli_identify photo.jpg` (run inside the container) — embeds a
   photo and calls `/api/v1/identify/` with it, like a real edge device would.
 
+## Development
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements-dev.txt   # adds pytest, httpx, ruff on top of requirements.txt
+```
+
+Run the tests. `app/core/face_engine.py` builds a real `FaceEngine` at import
+time, so the paths in `config.yaml` (or whatever `CONFIG_PATH` points at) must
+actually resolve — the shipped `config.yaml` uses container-absolute paths
+(`/app/models/...`), which only exist inside the running container's bind
+mount. To run the suite from the host, point `CONFIG_PATH` at a copy of
+`config.yaml` with `models.*_path` rewritten to this repo's `./models`
+directory on disk:
+
+```bash
+pytest tests/ -v                        # inside the container (or after the bind mount is set up)
+CONFIG_PATH=/path/to/host-config.yaml pytest tests/ -v   # from the host
+```
+
+Lint (also enforced by `tests/test_lint.py`, so a `pytest` run catches lint
+regressions too):
+
+```bash
+ruff check .
+```
+
 ## Project layout
 
 ```

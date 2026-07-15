@@ -1,7 +1,8 @@
 import uuid
 from datetime import date, time
+from typing import Literal
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile, Query
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 
 from app.core.database import (
     get_conn,
@@ -12,8 +13,6 @@ from app.core.database import (
 )
 from app.core.face_engine import NoFaceDetectedError, face_engine
 from app.schemas.registration import RegistrationOut, RegistrationResult, VectorOut
-
-from typing import Literal
 
 router = APIRouter(prefix="/api/v1/registrations", tags=["registrations"])
 
@@ -81,7 +80,9 @@ def register(
 
 
 @router.get("/", response_model=list[RegistrationOut], summary="List Registrations")
-def list_all(skip: int = Query(0, ge = 0), limit: int = Query(100, ge = 1, le = 500)) -> list[RegistrationOut]:
+def list_all(
+    skip: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=500)
+) -> list[RegistrationOut]:
     with get_conn() as conn:
         rows = list_registrations(conn, skip=skip, limit=limit)
         out = []
