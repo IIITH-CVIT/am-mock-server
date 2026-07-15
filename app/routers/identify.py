@@ -57,7 +57,7 @@ def identify(
     """Unified identification endpoint.
 
     - type=id: direct registration UUID lookup
-    - type=face: face vector search (512-dim, matching the mobilefacenet embedding)
+    - type=face: face vector search (128-dim, matching the SFace embedding)
     - type=fingerprint: fingerprint vector search (no fingerprint capture route exists in this mock,
       so this will only ever return "no match")
     """

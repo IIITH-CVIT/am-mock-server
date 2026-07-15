@@ -67,8 +67,8 @@ List/fetch registrations, including visit details and stored vector metadata
 
 - `type=id`, `id=<registration_id>` — direct lookup.
 - `type=face`, `face_vector=<JSON array or comma-separated floats>` — nearest
-  stored face embedding (512-dim, MobileFaceNet) within
-  `identify.face_recognition_threshold`.
+  stored face embedding (dimension follows `models.embedder_model`: 128-dim for
+  sface, 512-dim for auraface) within `identify.face_recognition_threshold`.
 - `type=fingerprint` — accepted but always returns "no match found" (see
   above).
 
@@ -89,8 +89,10 @@ database:
   path: "/app/data/db.sqlite"
 
 models:
-  face_detector_path: "/app/models/face_detection_yunet_2023mar.onnx"
-  face_recognizer_path: "/app/models/mobilefacenet.onnx"
+  face_detector_path: "/app/models/face_detection_yunet_2026may.onnx"
+  face_recognizer_path: "/app/models/face_recognition_sface_2021dec.onnx"
+  face_recognizer_auraface_path: "/app/models/aurar100.onnx"
+  embedder_model: "sface"   # sface (128-dim, native cv2) | auraface (512-dim, onnxruntime)
   face_detector_input_size: 640
   face_detector_score_threshold: 0.5
 
@@ -102,10 +104,21 @@ identify:
 
 ## Face pipeline
 
-[app/core/face_engine.py](app/core/face_engine.py) mirrors the real server's
-pipeline: YuNet (ONNX) detects a face and 5 landmarks, the face is aligned into
-a 112x112 ArcFace pose, and MobileFaceNet (ONNX) produces a normalized 512-dim
-embedding. Both models run via `onnxruntime` (CPU).
+[app/core/face_engine.py](app/core/face_engine.py) always detects via OpenCV 5's
+native `cv2.FaceDetectorYN` (YuNet), returning a bbox + 5 landmarks. Embedding is
+one of two never-mixed pairings, selected by `models.embedder_model`:
+
+- **sface** (default) — `cv2.FaceRecognizerSF` aligns the crop via `alignCrop()`
+  and produces a normalized 128-dim embedding via `feature()`. No `onnxruntime`,
+  runs entirely through OpenCV's built-in `objdetect` API.
+- **auraface** — `aurar100.onnx` (ArcFace-style) via `onnxruntime`: the detector's
+  landmarks are warped into the 112x112 ArcFace reference pose
+  (`estimateAffinePartial2D` + `warpAffine`), BGR→RGB, `(x-127.5)/128`, producing a
+  normalized 512-dim embedding.
+
+Whichever pairing is configured, the client (`Am-FaceRecognition-Client`) must be
+set to the same `embedder.model` — the server never re-derives embeddings from
+pixels, it only vector-searches whatever the client submits.
 
 ## Utilities
 
@@ -120,7 +133,7 @@ app/
   core/
     config.py       # loads config.yaml into typed Settings
     database.py      # SQLite schema + queries
-    face_engine.py    # YuNet detection + MobileFaceNet embedding
+    face_engine.py    # YuNet detection + sface (native cv2) or auraface (onnxruntime) embedding
   routers/
     registrations.py # register / list / get
     identify.py       # id / face / fingerprint lookup
