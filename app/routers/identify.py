@@ -9,7 +9,7 @@ MAX_VECTOR_LENGTH = 4096
 from app.core.config import settings
 from app.core.database import get_conn, get_registration, list_vectors_by_kind
 from app.schemas.identify import IdentifyResponse
-from app.core.face_engine import DLIB_EMBEDDING_DIM, face_engine
+from app.core.face_engine import face_engine
 
 router = APIRouter(prefix="/api/v1/identify", tags=["identify"])
 
@@ -40,25 +40,16 @@ def _normalized_l2_distance(a: np.ndarray, b: np.ndarray) -> float:
         return float("inf")
     return float(np.linalg.norm(a / a_norm - b / b_norm))
 
-def _raw_l2_distance(a: np.ndarray, b: np.ndarray) -> float:
-    return float(np.linalg.norm(a - b))
-
-def _find_best_match(kind: str, query: list[float], vector_type: Optional[str], normalize: bool = True):
-    """Returns (registration, distance) for the closest stored vector; smallest L2 distance wins.
-
-    normalize=True (mobilefacenet) compares unit-normalized vectors; normalize=False
-    (dlib) compares the raw descriptors directly, matching how each model's cutoff
-    is defined in am-master-server.
-    """
+def _find_best_match(kind: str, query: list[float], vector_type: Optional[str]):
+    """Returns (registration, distance) for the closest stored vector; smallest normalized L2 distance wins."""
     query_arr = np.array(query, dtype=np.float32)
-    metric = _normalized_l2_distance if normalize else _raw_l2_distance
     with get_conn() as conn:
         candidates = list_vectors_by_kind(conn, kind=kind, dim=len(query), source=vector_type)
         best_row = None
         best_distance = float("inf")
         for row in candidates:
             stored = np.array(json.loads(row["vector"]), dtype=np.float32)
-            distance = metric(query_arr, stored)
+            distance = _normalized_l2_distance(query_arr, stored)
             if distance < best_distance:
                 best_distance = distance
                 best_row = row
@@ -79,8 +70,8 @@ def identify(
     """Unified identification endpoint.
 
     - type=id: direct registration UUID lookup
-    - type=face: face vector search — send a 512-dim mobilefacenet vector or a
-      128-dim dlib vector; the dimension selects which enrolled gallery is searched
+    - type=face: face vector search — dimension must match the configured
+      `models.embedder_model` (128-dim for sface, 512-dim for auraface)
     - type=fingerprint: fingerprint vector search (no fingerprint capture route exists in this mock,
       so this will only ever return "no match")
     """
@@ -107,24 +98,17 @@ def identify(
         if not face_vector:
             return IdentifyResponse(message="face_vector is required for type=face")
         query = _parse_vector(face_vector)
-        # The dimension picks the model: 512-dim -> mobilefacenet (normalized L2),
-        # 128-dim -> dlib (raw L2). Each has its own match threshold.
-        mobilefacenet_dim = face_engine.embedding_dim
-        if len(query) == mobilefacenet_dim:
-            normalize = True
-            threshold = settings.identify.face_recognition_threshold
-        elif len(query) == DLIB_EMBEDDING_DIM:
-            normalize = False
-            threshold = settings.identify.dlib_face_recognition_threshold
-        else:
+        expected_dim = face_engine.embedding_dim
+        if len(query) != expected_dim:
             raise HTTPException(
                 status_code = 400,
                 detail = (
-                    f"face_vector has {len(query)} dimensions, expected "
-                    f"{DLIB_EMBEDDING_DIM} (dlib) or {mobilefacenet_dim} (mobilefacenet)"
+                    f"face_vector has {len(query)} dimensions, expected {expected_dim} "
+                    f"({face_engine.model_name})"
                 ),
             )
-        registration, distance = _find_best_match("face", query, vector_type, normalize=normalize)
+        threshold = settings.identify.face_recognition_threshold
+        registration, distance = _find_best_match("face", query, vector_type)
     else:
         if not fingerprint_vector:
             return IdentifyResponse(message="fingerprint_vector is required for type=fingerprint")

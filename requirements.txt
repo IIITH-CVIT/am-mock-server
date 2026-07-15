@@ -3,11 +3,5 @@ uvicorn[standard]==0.34.0
 python-multipart==0.0.20
 pyyaml==6.0.2
 numpy>=2.1.0
-opencv-python-headless>=4.10.0.84
-onnxruntime>=1.20.1
-# dlib backend: lets the server compute a 128-dim dlib descriptor at registration
-# alongside the 512-dim mobilefacenet one. dlib compiles from source (~10-15 min
-# on first build); the Containerfile installs cmake/g++/BLAS for it.
-dlib==20.0.1
-face_recognition_models==0.3.0
-setuptools==70.3.0 
+opencv-python-headless==5.0.0.93
+onnxruntime==1.20.1

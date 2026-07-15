@@ -51,3 +51,6 @@ Thumbs.db
 
 # Docker
 docker-compose.override.yml
+
+# Large model weights (too big for git; bind-mounted at runtime)
+models/aurar100.onnx

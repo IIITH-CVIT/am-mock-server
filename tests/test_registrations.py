@@ -10,7 +10,7 @@ async def test_register_does_not_block_event_loop(monkeypatch):
 
     def slow_embed(image_bytes):
         time.sleep(1.0)
-        return [0.1] * 512
+        return [0.1] * 128
 
     monkeypatch.setattr(fe_module.face_engine, "embed", slow_embed)
 
@@ -42,30 +42,19 @@ async def test_register_does_not_block_event_loop(monkeypatch):
         f"/health took {health_elapsed:.2f}s - register() is blocking the event loop"
     )
 
-def test_register_stores_both_embeddings_and_both_identify(client, monkeypatch):
-    """End-to-end: one registration enrolls BOTH a mobilefacenet (512) and a dlib
-    (128) vector, and either can then identify the person."""
+def test_register_stores_embedding_and_identify_matches(client, monkeypatch):
+    """End-to-end: one registration enrolls a single (sface, 128-dim) vector,
+    which can then be used to identify the person."""
     import json
 
     from app.core import face_engine as fe_module
-    from app.routers import registrations as reg_module
 
-    # Non-constant vectors: other tests enroll a constant [0.1]*512, and any two
+    # Non-constant vector: other tests enroll a constant [0.1]*128, and any two
     # constant vectors normalize to the same unit vector — a distinctive pattern
     # avoids a spurious tie in the shared test DB.
-    mobile_vec = [float((i % 13) + 1) for i in range(512)]
-    dlib_vec = [float((i % 5) - 2) for i in range(128)]
+    face_vec = [float((i % 13) + 1) for i in range(128)]
 
-    # Real mobilefacenet engine is stubbed; a fake dlib engine stands in for the
-    # (uncompiled-here) real one so the dual-enroll path runs exactly as it would.
-    class _FakeDlib:
-        model_name = "dlib"
-
-        def embed(self, image_bytes):
-            return list(dlib_vec)
-
-    monkeypatch.setattr(fe_module.face_engine, "embed", lambda b: list(mobile_vec))
-    monkeypatch.setattr(reg_module, "dlib_engine", _FakeDlib())
+    monkeypatch.setattr(fe_module.face_engine, "embed", lambda b: list(face_vec))
 
     resp = client.post(
         "/api/v1/registrations/register",
@@ -76,23 +65,14 @@ def test_register_stores_both_embeddings_and_both_identify(client, monkeypatch):
     assert resp.status_code == 200
     reg_id = resp.json()["registration_id"]
 
-    # Both vectors are enrolled under the one registration.
     detail = client.get(f"/api/v1/registrations/{reg_id}").json()
     stored = {(v["model"], v["dim"]) for v in detail["vectors"]}
-    assert ("mobilefacenet", 512) in stored
-    assert ("dlib", 128) in stored
+    assert ("sface", 128) in stored
 
-    # The dlib (128-dim) query matches.
-    r_dlib = client.post("/api/v1/identify/", data={
-        "type": "face", "face_vector": json.dumps(dlib_vec)})
-    assert r_dlib.status_code == 200
-    assert r_dlib.json()["name"] == "Alice Kumar"
-
-    # The mobilefacenet (512-dim) query matches too.
-    r_mobile = client.post("/api/v1/identify/", data={
-        "type": "face", "face_vector": json.dumps(mobile_vec)})
-    assert r_mobile.status_code == 200
-    assert r_mobile.json()["name"] == "Alice Kumar"
+    r = client.post("/api/v1/identify/", data={
+        "type": "face", "face_vector": json.dumps(face_vec)})
+    assert r.status_code == 200
+    assert r.json()["name"] == "Alice Kumar"
 
 
 def test_register_rejects_oversized_full_name(client):
@@ -147,7 +127,7 @@ def test_register_rejects_oversized_image(client):
 def test_register_accepts_image_at_exact_limit(client, monkeypatch):
     # confirms the +1 boundary math doesn't off-by-one reject legitimate uploads
     from app.core import face_engine as fe_module
-    monkeypatch.setattr(fe_module.face_engine, "embed", lambda b: [0.1] * 512)
+    monkeypatch.setattr(fe_module.face_engine, "embed", lambda b: [0.1] * 128)
     exactly_at_limit = b"\x00" * (10 * 1024 * 1024)
     resp = client.post(
         "/api/v1/registrations/register",

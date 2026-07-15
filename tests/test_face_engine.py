@@ -1,43 +1,51 @@
-import pytest 
-from unittest.mock import MagicMock, patch 
-from app.core.face_engine import FaceEngine 
+import numpy as np
+import pytest
+from unittest.mock import MagicMock, patch
 
-def _fake_session_with_outputs(names):
+from app.core.face_engine import FaceEngine, NoFaceDetectedError
+
+
+def _fake_detector(faces=None):
+    detector = MagicMock()
+    detector.detect.return_value = (None, faces)
+    return detector
+
+
+def test_sface_engine_loads_native_recognizer():
+    """Default embedder_model (sface) uses cv2.FaceRecognizerSF, not onnxruntime."""
+    with patch("cv2.FaceDetectorYN.create", return_value=_fake_detector()), \
+         patch("cv2.FaceRecognizerSF.create", return_value=MagicMock()) as mock_sface, \
+         patch("onnxruntime.InferenceSession") as mock_ort:
+        engine = FaceEngine()
+        assert engine.model_name == "sface"
+        assert engine.embedding_dim == 128
+        mock_sface.assert_called_once()
+        mock_ort.assert_not_called()
+
+
+def test_auraface_engine_loads_onnxruntime_session(monkeypatch):
+    """embedder_model=auraface loads aurar100.onnx via onnxruntime instead of cv2.FaceRecognizerSF."""
+    from app.core import face_engine as fe_module
+
+    monkeypatch.setattr(fe_module.settings.models, "embedder_model", "auraface")
+
     session = MagicMock()
-    session.get_inputs.return_value = [MagicMock(name = "input")]
-    session.get_outputs.return_value = [MagicMock(name = n) for n in names]
-    for out, n in zip(session.get_outputs.return_value, names):
-        out.name = n
+    session.get_inputs.return_value = [MagicMock(name="input")]
     session.get_inputs.return_value[0].name = "input"
+    session.get_outputs.return_value = [MagicMock(shape=[1, 512])]
 
-    return session
-
-def test_missing_output_name_fails_fast():
-    incomplete = _fake_session_with_outputs(["cls_8", "obj_8", "bbox_8", "kps_8"])  # missing stride 16/32
-    with patch("onnxruntime.InferenceSession", return_value=incomplete):
-        with pytest.raises(RuntimeError, match="missing expected output tensor"):
-            FaceEngine()
-
-def test_correct_output_names_pass():
-    names = [f"{p}_{s}" for s in (8, 16, 32) for p in ("cls", "obj", "bbox", "kps")]
-    good_detector = _fake_session_with_outputs(names)
-    good_recognizer = _fake_session_with_outputs(["embedding"])
-    good_recognizer.get_outputs.return_value[0].shape = [1, 512]
-    with patch("onnxruntime.InferenceSession", side_effect=[good_detector, good_recognizer]):
-        engine = FaceEngine()  # should not raise
+    with patch("cv2.FaceDetectorYN.create", return_value=_fake_detector()), \
+         patch("cv2.FaceRecognizerSF.create") as mock_sface, \
+         patch("onnxruntime.InferenceSession", return_value=session):
+        engine = FaceEngine()
+        assert engine.model_name == "auraface"
         assert engine.embedding_dim == 512
+        mock_sface.assert_not_called()
 
-def test_missing_model_file_reports_bind_mount_hint():
-    """A missing model file (the classic un-wired ./models bind mount) must fail
-    with a clear, actionable message — not a raw onnxruntime error at boot."""
-    with patch("onnxruntime.InferenceSession", side_effect=Exception("load failed")), \
-         patch("app.core.face_engine.os.path.exists", return_value=False):
-        with pytest.raises(RuntimeError, match="not found.*bind-mounted"):
-            FaceEngine()
 
-def test_corrupt_model_file_reports_load_failure():
-    """A present-but-unloadable file gets a different, equally clear message."""
-    with patch("onnxruntime.InferenceSession", side_effect=Exception("invalid onnx")), \
-         patch("app.core.face_engine.os.path.exists", return_value=True):
-        with pytest.raises(RuntimeError, match="could not load it"):
-            FaceEngine()
+def test_no_face_detected_raises():
+    with patch("cv2.FaceDetectorYN.create", return_value=_fake_detector(faces=None)), \
+         patch("cv2.FaceRecognizerSF.create", return_value=MagicMock()):
+        engine = FaceEngine()
+        with pytest.raises(NoFaceDetectedError):
+            engine._detect_face(np.zeros((10, 10, 3), dtype=np.uint8))

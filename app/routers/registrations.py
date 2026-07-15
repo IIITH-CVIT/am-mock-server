@@ -10,14 +10,10 @@ from app.core.database import (
     insert_vector,
     list_registrations,
 )
-from app.core.face_engine import NoFaceDetectedError, dlib_engine, face_engine
+from app.core.face_engine import NoFaceDetectedError, face_engine
 from app.schemas.registration import RegistrationOut, RegistrationResult, VectorOut
 
 from typing import Literal
-
-import logging
-
-logger = logging.getLogger("mock_server")
 
 router = APIRouter(prefix="/api/v1/registrations", tags=["registrations"])
 
@@ -33,14 +29,10 @@ def register(
 ) -> RegistrationResult:
     """Seed a person's registration: name + visit details + one face image.
 
-    Detects the face and computes TWO embeddings from the same photo — a 512-dim
-    mobilefacenet (YuNet-detected) vector and a 128-dim dlib vector — and stores
-    both. A client can then identify using either model. Only the name, visit
-    details, and the vectors are persisted; the image bytes are discarded.
-
-    If one backend can't find a face in the photo (dlib's HOG and YuNet don't
-    always agree on a hard image) the other is still stored, and registration
-    succeeds as long as at least one embedding was produced.
+    Detects the face and computes one embedding from the photo — via whichever
+    backend `models.embedder_model` selects (sface or auraface, see
+    app/core/face_engine.py). Only the name, visit details, and the vector are
+    persisted; the image bytes are discarded.
     """
 
     if not image.content_type or not image.content_type.startswith("image/"):
@@ -48,7 +40,7 @@ def register(
             status_code = 415,
             detail = f"Expected an image file, got content_type = {image.content_type!r}",
         )
-        
+
     try:
         date.fromisoformat(date_of_visit)
         time.fromisoformat(timeslot)
@@ -62,43 +54,29 @@ def register(
             detail = f"Image exceeds max size of {MAX_IMAGE_SIZE_BYTES // (1024 * 1024)}MB",
         )
 
-    # Embed the same photo with each available backend independently, collecting
-    # whichever succeed. Keeping them independent means a face one detector misses
-    # doesn't sink the whole registration.
-    embeddings: list[tuple[str, list[float]]] = []
-    engines = [face_engine]
-    if dlib_engine is not None:
-        engines.append(dlib_engine)
-
-    for engine in engines:
-        try:
-            embeddings.append((engine.model_name, engine.embed(image_bytes)))
-        except NoFaceDetectedError:
-            logger.warning("%s found no face in the uploaded image", engine.model_name)
-        except ValueError as exc:
-            logger.warning("%s could not embed the uploaded image: %s", engine.model_name, exc)
-
-    if not embeddings:
+    try:
+        vector = face_engine.embed(image_bytes)
+    except NoFaceDetectedError:
         raise HTTPException(status_code=422, detail="no face detected in uploaded image")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
 
     registration_id = str(uuid.uuid4())
     with get_conn() as conn:
         insert_registration(conn, registration_id, full_name, date_of_visit, timeslot, ticket_category)
-        for model_name, vector in embeddings:
-            insert_vector(
-                conn,
-                vector_id=str(uuid.uuid4()),
-                registration_id=registration_id,
-                kind="face",
-                model=model_name,
-                vector=vector,
-            )
+        insert_vector(
+            conn,
+            vector_id=str(uuid.uuid4()),
+            registration_id=registration_id,
+            kind="face",
+            model=face_engine.model_name,
+            vector=vector,
+        )
 
-    stored = ", ".join(f"{model} ({len(vec)}-dim)" for model, vec in embeddings)
     return RegistrationResult(
         registration_id=registration_id,
         status="completed",
-        message=f"registration created with {len(embeddings)} face embedding(s): {stored}",
+        message=f"registration created with a {len(vector)}-dim {face_engine.model_name} face embedding",
     )
 
 
