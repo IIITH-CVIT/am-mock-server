@@ -40,13 +40,13 @@ return "no match found".
 
 ## Running
 
-**Prerequisites:** a Linux host with `sudo` and internet access on the first run (to install Podman and build the image). Nothing else to install by hand — Python 3.13 and every library live inside the container, and the models are bundled in `./models`. (macOS works too via `brew`, but needs `podman machine start` first.)
+**Prerequisites:** a Linux host with `sudo` and internet access on the first run (to install Podman and build the image). Nothing else to install by hand — Python 3.13 and every library live inside the container, and the models are bundled in `./models`.
 
 ```bash
 ./run.sh
 ```
 
-`run.sh` bootstraps the toolchain: if `podman` isn't installed, it installs it via the host package manager (`dnf`/`yum` on Fedora/RHEL, `apt` on Debian/Ubuntu, also `zypper`/`pacman`/`brew`) — this needs `sudo` and network access. It's idempotent: if `podman` is already present it just builds the image and (re)starts the container (`podman build` + `podman run`, replacing any previous container of the same name). There's no compose provider or Podman API socket involved as a single container doesn't need one, so `run.sh` talks to `podman` directly. The
+`run.sh` bootstraps the toolchain: if `podman` isn't installed, it installs it via the host package manager (`dnf`/`yum` on Fedora/RHEL, `apt` on Debian/Ubuntu, also `zypper`/`pacman`) — this needs `sudo` and network access. It's idempotent: if `podman` is already present it just builds the image and (re)starts the container (`podman build` + `podman run`, replacing any previous container of the same name). There's no compose provider or Podman API socket involved as a single container doesn't need one, so `run.sh` talks to `podman` directly. The
 `Containerfile` uses standard Docker-compatible build syntax, so it also builds fine under plain Docker (`docker build` / `docker run`) if you prefer. The server listens on `http://localhost:8000`:
 
 - `/` — registration web UI
