@@ -3,3 +3,4 @@ pytest==8.3.4
 anyio==4.7.0
 httpx==0.28.1
 ruff==0.15.21
+pyinstaller==6.11.1

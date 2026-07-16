@@ -39,30 +39,7 @@ jobs:
       # aurar100.onnx (the auraface model) is gitignored — too large for git.
       # The default embedder_model is sface, which only needs the two model
       # files that ARE tracked in git, so tests run against the real sface
-      # pipeline. Paths here are relative to the checkout (unlike config.yaml,
-      # which uses container-absolute /app/... paths for the Docker image).
-      - name: Write CI config
-        run: |
-          cat > ci-config.yaml <<'EOF'
-          server:
-            host: "0.0.0.0"
-            port: 8000
-          database:
-            path: "./data/ci-test.sqlite"
-          models:
-            face_detector_path: "./models/face_detection_yunet_2026may.onnx"
-            face_recognizer_path: "./models/face_recognition_sface_2021dec.onnx"
-            face_recognizer_auraface_path: "./models/aurar100.onnx"
-            embedder_model: "sface"
-            face_detector_input_size: 640
-            face_detector_score_threshold: 0.5
-          identify:
-            face_recognition_threshold: 0.8
-            fingerprint_recognition_threshold: 0.7
-            default_n: 10
-          EOF
-
+      # pipeline. config.yaml now uses paths relative to the checkout, so no
+      # CI-specific config override is needed.
       - name: Run pytest
-        env:
-          CONFIG_PATH: ci-config.yaml
         run: python -m pytest tests/ -v

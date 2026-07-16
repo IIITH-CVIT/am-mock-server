@@ -40,24 +40,23 @@ return "no match found".
 
 ## Running
 
-**Prerequisites:** a Linux host with `sudo` and internet access on the first run (to install Podman and build the image). Nothing else to install by hand — Python 3.13 and every library live inside the container, and the models are bundled in `./models`.
+**Prerequisites:** Python 3.13 on the host (used only to build the binary). No container runtime, no Podman/Docker.
 
 ```bash
 ./run.sh
 ```
 
-`run.sh` bootstraps the toolchain: if `podman` isn't installed, it installs it via the host package manager (`dnf`/`yum` on Fedora/RHEL, `apt` on Debian/Ubuntu, also `zypper`/`pacman`) — this needs `sudo` and network access. It's idempotent: if `podman` is already present it just builds the image and (re)starts the container (`podman build` + `podman run`, replacing any previous container of the same name). There's no compose provider or Podman API socket involved as a single container doesn't need one, so `run.sh` talks to `podman` directly. The
-`Containerfile` uses standard Docker-compatible build syntax, so it also builds fine under plain Docker (`docker build` / `docker run`) if you prefer. The server listens on `http://localhost:8000`:
+`run.sh` creates a `.venv`, installs dependencies, and builds a standalone binary with PyInstaller (`dist/mock-server`) the first time you run it, then execs it directly. On later runs it skips the rebuild unless something under `app/` or `requirements.txt` changed, so re-running `./run.sh` is the same "one command" whether it's the first launch or the hundredth. The server listens on `http://localhost:8000`:
 
 - `/` — registration web UI
 - `/docs` — interactive API docs (Swagger UI)
 - `/health` — health check
 
-`./models` (ONNX weights) and `./config.yaml` are bind-mounted read-only;
-`./data` (the SQLite DB) is bind-mounted read-write so it survives container
-rebuilds/restarts.
+`./models` (ONNX weights), `./config.yaml`, and `./data` (the SQLite DB) are
+plain files read directly from disk next to the binary — no bind mounts
+involved.
 
-The container image bakes in the application code, so after changing files under `app/` you need to rebuild (`./run.sh` again) to pick up the changes.
+Since the binary bundles the application code, after changing files under `app/` you need to rebuild (`./run.sh` again) to pick up the changes.
 
 ### Concurrency
 
@@ -97,7 +96,7 @@ curl -X POST http://localhost:8000/api/v1/identify/ -F "type=id" -F "id=<registr
 
 **By face** — this route matches on a face *vector*, not an image (the server vector-searches; it does not re-embed here). The vector must match the dimension of the configured `models.embedder_model` (128 for sface, 512 for auraface). Two easy ways to produce a vector from a photo:
 - **Mock client** (the realistic edge-device flow): `client.py --server photo.jpg`, configured to send vectors from the same model this server is configured with — see the client README, and `## Running end-to-end with the mock client` below.
-- **Inside the container**: `podman exec mock-server python -m app.cli_identify /path/to/photo.jpg` — embeds the photo (with the configured model) and calls identify for you.
+- **Locally**: `python -m app.cli_identify /path/to/photo.jpg` (from the venv, with the server running) — embeds the photo (with the configured model) and calls identify for you.
 
 A match returns the person's details with `distance` (lower = better; under `identify.face_recognition_threshold` — `0.8` by default — counts as a match) and `confidence`.
 
@@ -142,7 +141,9 @@ identical to a genuine no-match; it's a `400` now.
 
 - **compose dropped in favor of plain `podman build`/`podman run`**: this project is a single container with no inter-container networking or dependency ordering, so `podman-compose`/`podman compose` (and the Podman API socket it talks to) added a toolchain dependency without buying anything. `run.sh` now calls `podman build` and `podman run` directly.
 
-- **Bind mounts failed under rootless Podman on SELinux-enforcing hosts (Fedora/RHEL)**: without an SELinux relabel suffix the container gets permission-denied reading `./config.yaml`/`./models` and writing `./data`. Fixed: the bind mounts in `run.sh` carry `:Z` (private relabel) on each (`:ro,Z` for the read-only ones). It's a no-op on non-SELinux hosts (plain Docker on Ubuntu), so it's safe cross-platform; switch to `:z` if you ever share a mount between containers.
+- **Bind mounts failed under rootless Podman on SELinux-enforcing hosts (Fedora/RHEL)**: without an SELinux relabel suffix the container gets permission-denied reading `./config.yaml`/`./models` and writing `./data`. Fixed at the time by carrying `:Z` (private relabel) on each bind mount in `run.sh`. No longer applicable — see the next entry.
+
+- **Podman/containers dropped in favor of a standalone binary**: this mock doesn't need process isolation or image distribution, so the container layer (`Containerfile`, `compose.yml`, Podman itself) was pure toolchain overhead. `run.sh` now builds the app into a single native executable with PyInstaller (`dist/mock-server`) and runs that directly — no container runtime, no bind mounts (just plain files in `./config.yaml`, `./models`, `./data` read straight off disk), no SELinux relabeling to worry about.
 
 ## API
 
@@ -194,7 +195,7 @@ source. Returns an `IdentifyResponse` with `match_type`, `distance`,
 
 ## Configuration
 
-`config.yaml` (bind-mounted, read on startup — see [app/core/config.py](app/core/config.py)):
+`config.yaml` (read from disk on startup, next to the binary — see [app/core/config.py](app/core/config.py)):
 
 ```yaml
 server:
@@ -202,12 +203,12 @@ server:
   port: 8000
 
 database:
-  path: "/app/data/db.sqlite"
+  path: "./data/db.sqlite"
 
 models:
-  face_detector_path: "/app/models/face_detection_yunet_2026may.onnx"
-  face_recognizer_path: "/app/models/face_recognition_sface_2021dec.onnx"
-  face_recognizer_auraface_path: "/app/models/aurar100.onnx"
+  face_detector_path: "./models/face_detection_yunet_2026may.onnx"
+  face_recognizer_path: "./models/face_recognition_sface_2021dec.onnx"
+  face_recognizer_auraface_path: "./models/aurar100.onnx"
   embedder_model: "sface"   # sface (128-dim, native cv2) | auraface (512-dim, onnxruntime)
   face_detector_input_size: 640
   face_detector_score_threshold: 0.5
@@ -218,12 +219,12 @@ identify:
   default_n: 10
 ```
 
-The YuNet detector and both embedder models are bind-mounted from `./models`.
+The YuNet detector and both embedder models are loaded from `./models`.
 `aurar100.onnx` is large (~250MB) and gitignored — it's expected to exist on
 disk (copied or downloaded there) even though it's not tracked by git.
 
-`config.yaml` is the single source of truth for all settings. If it's missing or unreadable at startup (e.g. `CONFIG_PATH` misconfigured, bind mount missing), the server logs a `WARNING` and falls back to the built-in defaults in `app/core/config.py`, and those defaults are kept in sync with the shipped `config.yaml` and covered by a test (`tests/test_config.py`), but if you ever
-see that warning in the logs, something is wrong with your bind mount, not your config values.
+`config.yaml` is the single source of truth for all settings. If it's missing or unreadable at startup (e.g. `CONFIG_PATH` misconfigured, or the file just isn't next to the binary), the server logs a `WARNING` and falls back to the built-in defaults in `app/core/config.py`, and those defaults are kept in sync with the shipped `config.yaml` and covered by a test (`tests/test_config.py`), but if you ever
+see that warning in the logs, something is wrong with where `config.yaml` lives, not your config values.
 
 ## Face pipeline
 
@@ -246,27 +247,23 @@ pixels, it only vector-searches whatever the client submits.
 ## Utilities
 
 - `./query_db.sh` — open a `sqlite3` shell on `data/db.sqlite`.
-- `python -m app.cli_identify photo.jpg` (run inside the container) — embeds a
+- `python -m app.cli_identify photo.jpg` (from the venv) — embeds a
   photo and calls `/api/v1/identify/` with it, like a real edge device would.
 
 ## Development
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -r requirements-dev.txt   # adds pytest, httpx, ruff on top of requirements.txt
+pip install -r requirements-dev.txt   # adds pytest, httpx, ruff, pyinstaller on top of requirements.txt
 ```
 
 Run the tests. `app/core/face_engine.py` builds a real `FaceEngine` at import
 time, so the paths in `config.yaml` (or whatever `CONFIG_PATH` points at) must
-actually resolve — the shipped `config.yaml` uses container-absolute paths
-(`/app/models/...`), which only exist inside the running container's bind
-mount. To run the suite from the host, point `CONFIG_PATH` at a copy of
-`config.yaml` with `models.*_path` rewritten to this repo's `./models`
-directory on disk:
+actually resolve — the shipped `config.yaml` already uses paths relative to
+the repo root (`./models/...`), so it resolves as-is when run from the repo:
 
 ```bash
-python -m pytest tests/ -v                        # inside the container (or after the bind mount is set up)
-CONFIG_PATH=/path/to/host-config.yaml python -m pytest tests/ -v   # from the host
+python -m pytest tests/ -v
 ```
 
 Use `python -m pytest`, not a bare `pytest` — the `-m` form adds the repo root
@@ -294,11 +291,11 @@ app/
   schemas/            # pydantic request/response models
   static/             # registration web UI (HTML/CSS/JS)
   main.py             # FastAPI app, routes, static mount
-models/                # ONNX weights (bind-mounted)
-data/                  # SQLite DB (bind-mounted, gitignored)
+  __main__.py         # uvicorn entrypoint (also the PyInstaller build target)
+models/                # ONNX weights, read from disk at runtime
+data/                  # SQLite DB (gitignored)
 config.yaml
-Containerfile
-run.sh
+run.sh                 # builds the binary (once) and runs it
 query_db.sh
 ```
 
@@ -309,7 +306,7 @@ The full loop on one machine — mock server + mock client — in four steps. As
 **1. Start the server** (this repo):
 ```bash
 cd am-mock-server
-./run.sh                                    # installs Podman if needed, builds, starts
+./run.sh                                    # builds the binary (first run) and starts it
 curl http://localhost:8000/health           # -> {"status":"ok"}
 ```
 
