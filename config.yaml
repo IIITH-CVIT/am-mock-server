@@ -3,16 +3,15 @@ server:
   port: 8000
 
 database:
-  # lives inside the bind-mounted ./data directory (see compose.yml) so it
-  # survives container restarts/rebuilds; the file itself is created on
-  # startup by init_db() if it doesn't exist yet
-  path: "/app/data/db.sqlite"
+  # lives in ./data next to the binary so it survives restarts/rebuilds;
+  # the file itself is created on startup by init_db() if it doesn't exist yet
+  path: "./data/db.sqlite"
 
 models:
-  # bind-mounted from the host ./models directory, not baked into the image
-  face_detector_path: "/app/models/face_detection_yunet_2026may.onnx"
-  face_recognizer_path: "/app/models/face_recognition_sface_2021dec.onnx"
-  face_recognizer_auraface_path: "/app/models/aurar100.onnx"
+  # loaded from ./models next to the binary
+  face_detector_path: "./models/face_detection_yunet_2026may.onnx"
+  face_recognizer_path: "./models/face_recognition_sface_2021dec.onnx"
+  face_recognizer_auraface_path: "./models/aurar100.onnx"
   # sface (128-dim, native cv2) | auraface (512-dim, onnxruntime) — must match
   # whichever embedder the client is configured to send
   embedder_model: "sface"

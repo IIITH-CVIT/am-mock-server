@@ -49,8 +49,10 @@ Thumbs.db
 .claude/
 *.swp
 
-# Docker
-docker-compose.override.yml
+# PyInstaller build output
+build/
+dist/
+*.spec
 
-# Large model weights (too big for git; bind-mounted at runtime)
+# Large model weights (too big for git; loaded at runtime from ./models)
 models/aurar100.onnx

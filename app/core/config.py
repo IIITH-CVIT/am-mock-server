@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 
 import yaml
 
-CONFIG_PATH = os.environ.get("CONFIG_PATH", "/app/config.yaml")
+CONFIG_PATH = os.environ.get("CONFIG_PATH", "config.yaml")
 
 @dataclass
 class ServerConfig:
@@ -12,13 +12,13 @@ class ServerConfig:
 
 @dataclass
 class DatabaseConfig:
-    path: str = "/app/data/db.sqlite"
+    path: str = "./data/db.sqlite"
 
 @dataclass
 class ModelsConfig:
-    face_detector_path: str = "/app/models/face_detection_yunet_2026may.onnx"
-    face_recognizer_path: str = "/app/models/face_recognition_sface_2021dec.onnx"
-    face_recognizer_auraface_path: str = "/app/models/aurar100.onnx"
+    face_detector_path: str = "./models/face_detection_yunet_2026may.onnx"
+    face_recognizer_path: str = "./models/face_recognition_sface_2021dec.onnx"
+    face_recognizer_auraface_path: str = "./models/aurar100.onnx"
     # sface (128-dim, native cv2.FaceRecognizerSF) | auraface (512-dim, onnxruntime)
     embedder_model: str = "sface"
     # initial square size passed to cv2.FaceDetectorYN.create(); actual
@@ -46,7 +46,7 @@ def load_settings(path: str = CONFIG_PATH) -> Settings:
     if not os.path.exists(path):
         print(
             f"WARNING: config file not found at {path!r} - using built-in defaults."
-            f"If this is unexpected, check CONFIG_PATH and the bind mount in compose.yml"
+            f"If this is unexpected, check CONFIG_PATH and that config.yaml sits next to the binary."
         )
         raw = {}
     else:
