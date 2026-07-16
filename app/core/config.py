@@ -16,24 +16,22 @@ class DatabaseConfig:
 
 @dataclass
 class ModelsConfig:
-    face_detector_path: str = "/app/models/face_detection_yunet_2023mar.onnx"
-    face_recognizer_path: str = "/app/models/mobilefacenet.onnx"
-    # square letterbox size fed to YuNet; the model has no built-in NMS, so
-    # there's no separate nms_threshold to configure
+    face_detector_path: str = "/app/models/face_detection_yunet_2026may.onnx"
+    face_recognizer_path: str = "/app/models/face_recognition_sface_2021dec.onnx"
+    face_recognizer_auraface_path: str = "/app/models/aurar100.onnx"
+    # sface (128-dim, native cv2.FaceRecognizerSF) | auraface (512-dim, onnxruntime)
+    embedder_model: str = "sface"
+    # initial square size passed to cv2.FaceDetectorYN.create(); actual
+    # detection runs at each image's real dimensions via setInputSize()
     face_detector_input_size: int = 640
     face_detector_score_threshold: float = 0.5
 
 @dataclass
 class IdentifyConfig:
-    # Max L2 distance between query and stored vector to count as a match.
-    # Each face model has its own cutoff because they live in different spaces:
-    #   - face_recognition_threshold: mobilefacenet (512-dim, L2-normalized) — mirrors
-    #     am-master-server's auraface_threshold.
-    #   - dlib_face_recognition_threshold: dlib (128-dim, raw descriptor) — mirrors
-    #     am-master-server's dlib_threshold. The query dimension (128 vs 512) selects
-    #     which cutoff and which distance metric identify() uses.
+    # Max normalized-L2 distance between query and stored vector to count as a
+    # match. Carried over from the mobilefacenet pipeline — may need empirical
+    # retuning now that vectors come from SFace's/AuraFace's embedding space.
     face_recognition_threshold: float = 0.8
-    dlib_face_recognition_threshold: float = 0.6
     fingerprint_recognition_threshold: float = 0.7
     default_n: int = 10
 

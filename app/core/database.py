@@ -79,7 +79,8 @@ def insert_vector(
     source: str = "registration",
 ) -> None:
     conn.execute(
-        "INSERT INTO vectors (id, registration_id, kind, source, model, dim, vector) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO vectors (id, registration_id, kind, source, model, dim, vector) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
         (vector_id, registration_id, kind, source, model, len(vector), json.dumps(vector)),
     )
 
@@ -97,7 +98,9 @@ def list_registrations(conn: sqlite3.Connection, skip: int = 0, limit: int = 100
     ).fetchall()
 
 
-def list_vectors_by_kind(conn: sqlite3.Connection, kind: str, dim: int, source: str | None = None) -> list[sqlite3.Row]:
+def list_vectors_by_kind(
+    conn: sqlite3.Connection, kind: str, dim: int, source: str | None = None
+) -> list[sqlite3.Row]:
     if source:
         return conn.execute(
             "SELECT * FROM vectors WHERE kind = ? AND dim = ? AND source = ?",

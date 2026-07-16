@@ -1,7 +1,7 @@
 import uuid
-from datetime import date, time
+from datetime import date
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile, Query
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 
 from app.core.database import (
     get_conn,
@@ -10,37 +10,29 @@ from app.core.database import (
     insert_vector,
     list_registrations,
 )
-from app.core.face_engine import NoFaceDetectedError, dlib_engine, face_engine
+from app.core.face_engine import NoFaceDetectedError, face_engine
 from app.schemas.registration import RegistrationOut, RegistrationResult, VectorOut
-
-from typing import Literal
-
-import logging
-
-logger = logging.getLogger("mock_server")
 
 router = APIRouter(prefix="/api/v1/registrations", tags=["registrations"])
 
 MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024
 
+DEFAULT_TIMESLOT = "10:00"
+DEFAULT_TICKET_CATEGORY = "general"
+
 @router.post("/register", response_model=RegistrationResult, summary="Register")
 def register(
     full_name: str = Form(..., min_length = 5, max_length = 200),
-    date_of_visit: str = Form(..., description="ISO date, e.g. 2026-07-01"),
-    timeslot: str = Form(..., description="ISO time, e.g. 10:00 or 10:00:00"),
-    ticket_category: Literal["general", "vip", "vvip", "staff"] = Form(...),
     image: UploadFile = File(...),
 ) -> RegistrationResult:
-    """Seed a person's registration: name + visit details + one face image.
+    """Seed a person's registration: name + one face image.
 
-    Detects the face and computes TWO embeddings from the same photo — a 512-dim
-    mobilefacenet (YuNet-detected) vector and a 128-dim dlib vector — and stores
-    both. A client can then identify using either model. Only the name, visit
-    details, and the vectors are persisted; the image bytes are discarded.
-
-    If one backend can't find a face in the photo (dlib's HOG and YuNet don't
-    always agree on a hard image) the other is still stored, and registration
-    succeeds as long as at least one embedding was produced.
+    Detects the face and computes one embedding from the photo — via whichever
+    backend `models.embedder_model` selects (sface or auraface, see
+    app/core/face_engine.py). Only the name, visit details, and the vector are
+    persisted; the image bytes are discarded. Visit details (date, timeslot,
+    ticket category) are not client input — the date is stamped as today, and
+    timeslot/ticket category are fixed defaults.
     """
 
     if not image.content_type or not image.content_type.startswith("image/"):
@@ -48,12 +40,10 @@ def register(
             status_code = 415,
             detail = f"Expected an image file, got content_type = {image.content_type!r}",
         )
-        
-    try:
-        date.fromisoformat(date_of_visit)
-        time.fromisoformat(timeslot)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=f"invalid date/time format: {exc}")
+
+    date_of_visit = date.today().isoformat()
+    timeslot = DEFAULT_TIMESLOT
+    ticket_category = DEFAULT_TICKET_CATEGORY
 
     image_bytes = image.file.read(MAX_IMAGE_SIZE_BYTES + 1)
     if len(image_bytes) > MAX_IMAGE_SIZE_BYTES:
@@ -62,48 +52,36 @@ def register(
             detail = f"Image exceeds max size of {MAX_IMAGE_SIZE_BYTES // (1024 * 1024)}MB",
         )
 
-    # Embed the same photo with each available backend independently, collecting
-    # whichever succeed. Keeping them independent means a face one detector misses
-    # doesn't sink the whole registration.
-    embeddings: list[tuple[str, list[float]]] = []
-    engines = [face_engine]
-    if dlib_engine is not None:
-        engines.append(dlib_engine)
-
-    for engine in engines:
-        try:
-            embeddings.append((engine.model_name, engine.embed(image_bytes)))
-        except NoFaceDetectedError:
-            logger.warning("%s found no face in the uploaded image", engine.model_name)
-        except ValueError as exc:
-            logger.warning("%s could not embed the uploaded image: %s", engine.model_name, exc)
-
-    if not embeddings:
+    try:
+        vector = face_engine.embed(image_bytes)
+    except NoFaceDetectedError:
         raise HTTPException(status_code=422, detail="no face detected in uploaded image")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
 
     registration_id = str(uuid.uuid4())
     with get_conn() as conn:
         insert_registration(conn, registration_id, full_name, date_of_visit, timeslot, ticket_category)
-        for model_name, vector in embeddings:
-            insert_vector(
-                conn,
-                vector_id=str(uuid.uuid4()),
-                registration_id=registration_id,
-                kind="face",
-                model=model_name,
-                vector=vector,
-            )
+        insert_vector(
+            conn,
+            vector_id=str(uuid.uuid4()),
+            registration_id=registration_id,
+            kind="face",
+            model=face_engine.model_name,
+            vector=vector,
+        )
 
-    stored = ", ".join(f"{model} ({len(vec)}-dim)" for model, vec in embeddings)
     return RegistrationResult(
         registration_id=registration_id,
         status="completed",
-        message=f"registration created with {len(embeddings)} face embedding(s): {stored}",
+        message=f"registration created with a {len(vector)}-dim {face_engine.model_name} face embedding",
     )
 
 
 @router.get("/", response_model=list[RegistrationOut], summary="List Registrations")
-def list_all(skip: int = Query(0, ge = 0), limit: int = Query(100, ge = 1, le = 500)) -> list[RegistrationOut]:
+def list_all(
+    skip: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=500)
+) -> list[RegistrationOut]:
     with get_conn() as conn:
         rows = list_registrations(conn, skip=skip, limit=limit)
         out = []

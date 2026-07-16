@@ -10,17 +10,21 @@ database:
 
 models:
   # bind-mounted from the host ./models directory, not baked into the image
-  face_detector_path: "/app/models/face_detection_yunet_2023mar.onnx"
-  face_recognizer_path: "/app/models/mobilefacenet.onnx"
-  # letterbox size fed to YuNet before its manual multi-scale decode
+  face_detector_path: "/app/models/face_detection_yunet_2026may.onnx"
+  face_recognizer_path: "/app/models/face_recognition_sface_2021dec.onnx"
+  face_recognizer_auraface_path: "/app/models/aurar100.onnx"
+  # sface (128-dim, native cv2) | auraface (512-dim, onnxruntime) — must match
+  # whichever embedder the client is configured to send
+  embedder_model: "sface"
+  # initial size passed to cv2.FaceDetectorYN.create(); each request calls
+  # setInputSize() with the actual image dimensions before detecting
   face_detector_input_size: 640
   face_detector_score_threshold: 0.5
 
 identify:
-  # Max L2 distance between query and stored vector to count as a match.
-  # Two face cutoffs because the two models live in different vector spaces;
-  # the query's dimension picks which one applies:
-  face_recognition_threshold: 0.8        # mobilefacenet (512-dim, L2-normalized)
-  dlib_face_recognition_threshold: 0.6   # dlib (128-dim, raw descriptor)
+  # max normalized-L2 distance between query and stored vector to count as a
+  # match. Carried over from the mobilefacenet pipeline — may need empirical
+  # retuning now that vectors come from SFace's/AuraFace's embedding space.
+  face_recognition_threshold: 0.8
   fingerprint_recognition_threshold: 0.7
   default_n: 10

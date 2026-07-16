@@ -7,34 +7,31 @@ Celery, S3/MinIO, Qdrant). Data is stored in a local SQLite file instead.
 ## Features
 
 - **Registration** — capture a name, visit date, time slot, ticket category,
-  and one face photo. The face is embedded on the spot with **two face models**
-  (see below); only the name, visit details, and the two embeddings are
+  and one face photo. The face is embedded on the spot with the configured
+  face model (see below); only the name, visit details, and the embedding are
   persisted (the image bytes are discarded).
 - **Identify** — look up a registration by ID, or by face vector (nearest
-  stored embedding within a configurable distance threshold). Works with either
-  face model.
+  stored embedding within a configurable distance threshold).
 - **Web UI** — a small registration form at `/` with webcam capture (falls
   back to file upload), for exercising the API by hand.
 
-## Two face models, enrolled together
+## One face model, selected by config
 
-Every registration stores **two** face embeddings computed from the same photo:
+Detection always runs via OpenCV 5's native `cv2.FaceDetectorYN` (YuNet).
+Embedding is one of two never-mixed pairings, selected by `models.embedder_model`
+in `config.yaml`:
 
-| Model | Vector size | How the client sends it | Match cutoff |
+| Model | Vector size | How it embeds | Match cutoff |
 |---|---|---|---|
-| **dlib** | 128 numbers | client's default (`config.yaml`) | distance < `0.6` |
-| **YuNet + MobileFaceNet** | 512 numbers | client's alternate (`config.yunet.yaml`) | distance < `0.8` |
+| **sface** (default) | 128 numbers | `cv2.FaceRecognizerSF`, native OpenCV 5, no `onnxruntime` | distance < `0.8` |
+| **auraface** | 512 numbers | `aurar100.onnx` (ArcFace-style) via `onnxruntime` | distance < `0.8` |
 
-This means the matching mock **client** works out of the box whichever model it's
-set to: its default is dlib, and it can switch to YuNet+MobileFaceNet by changing
-one setting. On identify, the server looks at how many numbers the incoming vector
-has (128 vs 512) and searches the matching gallery automatically. You don't pick a
-model in the API — the vector's size does it for you.
-
-> The two models live in **different number spaces**, so you can't compare a dlib
-> vector against a MobileFaceNet one. That's fine — the server keeps them separate
-> and never mixes them. It just means: whatever model the client registered with
-> is the model it must identify with. Since registration enrols both, either works.
+You don't pick a model per-request — the server always embeds with whichever
+pairing `config.yaml` names, and on identify it expects a vector of that same
+size. Whichever pairing is configured, the client (`Am-FaceRecognition-Client`)
+must be set to send vectors from the same model — the server never re-derives
+embeddings from pixels on identify, it only vector-searches whatever the client
+submits.
 
 Fingerprint identification (`type=fingerprint`) is wired into the schema and
 `/api/v1/identify/` endpoint for API-shape compatibility with the real server,
@@ -43,18 +40,13 @@ return "no match found".
 
 ## Running
 
-**Prerequisites:** a Linux host with `sudo` and internet access on the first run (to install Podman and build the image). Nothing else to install by hand — Python 3.13 and every library live inside the container, and the ONNX models are bundled in `./models`. (macOS works too via `brew`, but needs `podman machine start` first.)
-
-> **First build takes ~10-15 minutes.** The dlib model compiles from source inside
-> the image (the Containerfile installs the C++ build tools it needs). This happens
-> **once** — later rebuilds after code changes are fast because the compile is cached.
-> Just let the first `./run.sh` run to completion.
+**Prerequisites:** a Linux host with `sudo` and internet access on the first run (to install Podman and build the image). Nothing else to install by hand — Python 3.13 and every library live inside the container, and the models are bundled in `./models`.
 
 ```bash
 ./run.sh
 ```
 
-`run.sh` bootstraps the toolchain: if `podman` isn't installed, it installs it via the host package manager (`dnf`/`yum` on Fedora/RHEL, `apt` on Debian/Ubuntu, also `zypper`/`pacman`/`brew`) — this needs `sudo` and network access. It's idempotent: if `podman` is already present it just builds the image and (re)starts the container (`podman build` + `podman run`, replacing any previous container of the same name). There's no compose provider or Podman API socket involved as a single container doesn't need one, so `run.sh` talks to `podman` directly. The
+`run.sh` bootstraps the toolchain: if `podman` isn't installed, it installs it via the host package manager (`dnf`/`yum` on Fedora/RHEL, `apt` on Debian/Ubuntu, also `zypper`/`pacman`) — this needs `sudo` and network access. It's idempotent: if `podman` is already present it just builds the image and (re)starts the container (`podman build` + `podman run`, replacing any previous container of the same name). There's no compose provider or Podman API socket involved as a single container doesn't need one, so `run.sh` talks to `podman` directly. The
 `Containerfile` uses standard Docker-compatible build syntax, so it also builds fine under plain Docker (`docker build` / `docker run`) if you prefer. The server listens on `http://localhost:8000`:
 
 - `/` — registration web UI
@@ -82,12 +74,12 @@ Open **http://localhost:8000** in a browser and fill the form:
 | Field | Example | Rule |
 |---|---|---|
 | Full name | `Alice Kumar` | ≥ 5 characters |
-| Date of visit | `2026-07-08` | `YYYY-MM-DD` |
-| Time slot | `10:00` | `HH:MM` |
-| Ticket category | `general` | Choose from dropdown |
 | Photo | webcam capture, or the file-upload fallback | a clear front-facing face |
 
-Submit. The server detects the face, computes **both** embeddings (128-dim dlib + 512-dim MobileFaceNet), and stores the registration — you get back a `registration_id` and a message saying how many embeddings were stored. If it reports **"no face detected"**, use a clearer, front-facing photo.
+`date_of_visit`, `timeslot`, and `ticket_category` aren't collected from the
+form — the server stamps them itself (today's date, and fixed defaults).
+
+Submit. The server detects the face, computes the configured embedding (128-dim sface by default), and stores the registration — you get back a `registration_id` and a message naming the model and dimension stored. If it reports **"no face detected"**, use a clearer, front-facing photo.
 
 ### 2. Confirm it was stored
 
@@ -103,11 +95,11 @@ Lists everyone registered, with their stored vector metadata (kind / model / dim
 curl -X POST http://localhost:8000/api/v1/identify/ -F "type=id" -F "id=<registration_id>"
 ```
 
-**By face** — this route matches on a face *vector*, not an image (the server vector-searches; it does not re-embed here). The vector is either 128 numbers (dlib) or 512 numbers (MobileFaceNet); the server figures out which gallery to search from the size. Two easy ways to produce a vector from a photo:
-- **Mock client** (the realistic edge-device flow): `client.py --server photo.jpg` (default dlib), or add `--config config.yunet.yaml` for the 512-dim model — see the client README, and `## Running end-to-end with the mock client` below.
-- **Inside the container**: `podman exec mock-server python -m app.cli_identify /path/to/photo.jpg` — embeds the photo (with MobileFaceNet) and calls identify for you.
+**By face** — this route matches on a face *vector*, not an image (the server vector-searches; it does not re-embed here). The vector must match the dimension of the configured `models.embedder_model` (128 for sface, 512 for auraface). Two easy ways to produce a vector from a photo:
+- **Mock client** (the realistic edge-device flow): `client.py --server photo.jpg`, configured to send vectors from the same model this server is configured with — see the client README, and `## Running end-to-end with the mock client` below.
+- **Inside the container**: `podman exec mock-server python -m app.cli_identify /path/to/photo.jpg` — embeds the photo (with the configured model) and calls identify for you.
 
-A match returns the person's details with `distance` (lower = better; under the model's cutoff — `0.6` for dlib, `0.8` for MobileFaceNet — counts as a match) and `confidence`.
+A match returns the person's details with `distance` (lower = better; under `identify.face_recognition_threshold` — `0.8` by default — counts as a match) and `confidence`.
 
 ### 4. Inspect the database directly
 
@@ -138,7 +130,7 @@ identical to a genuine no-match; it's a `400` now.
 
 - **No global exception handler**: any unhandled exception previously returned Starlette's raw plain-text 500 (which broke the web UI's `JSON.parse`). A global handler now logs the full traceback server-side and returns clean JSON `{"detail": "internal server error"}`.
 
-- **`full_name`/`ticket_category` had no length limits; `GET /registrations/` had no `limit` cap**, now `5-200` characters each and `limit` capped at 500, both enforced with FastAPI's own `422` validation.
+- **`full_name` had no length limits; `GET /registrations/` had no `limit` cap**, now `5-200` characters and `limit` capped at 500, both enforced with FastAPI's own `422` validation. (`ticket_category` is no longer client input at all — see `## API` below.)
 
 - **Config defaults drifted from `config.yaml`**: in-code dataclass defaults now match the shipped `config.yaml` exactly, and a missing config file now logs a `WARNING` at startup instead of silently using different values.
 
@@ -161,13 +153,16 @@ identical to a genuine no-match; it's a `400` now.
 | field             | type | notes                                |
 |-------------------|------|---------------------------------------|
 | `full_name`       | str  | required, 5 - 200 characters          |
-| `date_of_visit`   | str  | required, ISO date (`YYYY-MM-DD`)     |
-| `timeslot`        | str  | required, ISO time (`HH:MM[:SS]`)     |
-| `ticket_category` | str  | required, 5 - 200 characters          |
 | `image`           | file | required, one face photo  , `image/*`, max 10MB|
 
+`date_of_visit`, `timeslot`, and `ticket_category` are not client input —
+they're always set server-side: `date_of_visit` to the current date at
+registration time, `timeslot` fixed to `"10:00"`, and `ticket_category` fixed
+to `"general"` (see `DEFAULT_TIMESLOT` / `DEFAULT_TICKET_CATEGORY` in
+`app/routers/registrations.py`).
+
 Returns `{ registration_id, status, message }`. 422 if no face is detected in
-the image; 400 if the date/time can't be parsed; 415 if the uploaded file's content-type isn't `image/*`; 413 if it exceeds 10MB.
+the image; 415 if the uploaded file's content-type isn't `image/*`; 413 if it exceeds 10MB.
 
 Detection + embedding runs synchronously on CPU (~a few hundred ms per image depending on hardware), so a single `register` call blocks for that long. This mirrors the real server's own per-request latency for this step, it isn't mock-specific overhead.
 
@@ -183,10 +178,10 @@ List/fetch registrations, including visit details and stored vector metadata
 
 - `type=id`, `id=<registration_id>` — direct lookup.
 - `type=face`, `face_vector=<JSON array or comma-separated floats>` — nearest
-  stored face embedding. The vector must be either **128-dim** (dlib, matched
-  within `identify.dlib_face_recognition_threshold`) or **512-dim** (MobileFaceNet,
-  matched within `identify.face_recognition_threshold`); any other length returns a
-  `400` error naming the two accepted sizes.
+  stored face embedding. The vector must match the configured `models.embedder_model`
+  dimension (**128-dim** for sface, **512-dim** for auraface), matched within
+  `identify.face_recognition_threshold`; any other length returns a `400` error
+  naming the expected size.
 - `type=fingerprint` — accepted but always returns "no match found" (see
   above). Vectors longer than 4096 elements are rejected with `400`
   regardless of type.
@@ -210,52 +205,80 @@ database:
   path: "/app/data/db.sqlite"
 
 models:
-  face_detector_path: "/app/models/face_detection_yunet_2023mar.onnx"
-  face_recognizer_path: "/app/models/mobilefacenet.onnx"
+  face_detector_path: "/app/models/face_detection_yunet_2026may.onnx"
+  face_recognizer_path: "/app/models/face_recognition_sface_2021dec.onnx"
+  face_recognizer_auraface_path: "/app/models/aurar100.onnx"
+  embedder_model: "sface"   # sface (128-dim, native cv2) | auraface (512-dim, onnxruntime)
   face_detector_input_size: 640
   face_detector_score_threshold: 0.5
 
 identify:
-  face_recognition_threshold: 0.8        # MobileFaceNet (512-dim) match cutoff
-  dlib_face_recognition_threshold: 0.6   # dlib (128-dim) match cutoff
+  face_recognition_threshold: 0.8
   fingerprint_recognition_threshold: 0.7
   default_n: 10
 ```
 
-The YuNet + MobileFaceNet models are bind-mounted from `./models`. The **dlib**
-model has no path here on purpose: its weights ship inside the
-`face_recognition_models` Python package (installed into the image), not in
-`./models`, so there's nothing extra to mount.
+The YuNet detector and both embedder models are bind-mounted from `./models`.
+`aurar100.onnx` is large (~250MB) and gitignored — it's expected to exist on
+disk (copied or downloaded there) even though it's not tracked by git.
 
 `config.yaml` is the single source of truth for all settings. If it's missing or unreadable at startup (e.g. `CONFIG_PATH` misconfigured, bind mount missing), the server logs a `WARNING` and falls back to the built-in defaults in `app/core/config.py`, and those defaults are kept in sync with the shipped `config.yaml` and covered by a test (`tests/test_config.py`), but if you ever
 see that warning in the logs, something is wrong with your bind mount, not your config values.
 
 ## Face pipeline
 
-[app/core/face_engine.py](app/core/face_engine.py) mirrors the real server's
-**two** identification backends, and registration runs both on the same photo:
+[app/core/face_engine.py](app/core/face_engine.py) always detects via OpenCV 5's
+native `cv2.FaceDetectorYN` (YuNet), returning a bbox + 5 landmarks. Embedding is
+one of two never-mixed pairings, selected by `models.embedder_model`:
 
-- **MobileFaceNet (`FaceEngine`)** — YuNet (ONNX) detects a face and 5 landmarks,
-  the face is aligned into a 112x112 ArcFace pose, and MobileFaceNet (ONNX)
-  produces a normalized 512-dim embedding. Both models run via `onnxruntime` (CPU).
-- **dlib (`DlibEngine`)** — dlib's HOG detector finds the face, a 5-point shape
-  predictor aligns it, and dlib's ResNet produces a raw (not normalized) 128-dim
-  descriptor. These weights ship inside the `face_recognition_models` package, so
-  dlib is compiled into the image (see the first-build note under `## Running`).
-  This is byte-for-byte the same pipeline the mock client uses for its default
-  dlib model, so the vectors match exactly.
+- **sface** (default) — `cv2.FaceRecognizerSF` aligns the crop via `alignCrop()`
+  and produces a normalized 128-dim embedding via `feature()`. No `onnxruntime`,
+  runs entirely through OpenCV's built-in `objdetect` API.
+- **auraface** — `aurar100.onnx` (ArcFace-style) via `onnxruntime`: the detector's
+  landmarks are warped into the 112x112 ArcFace reference pose
+  (`estimateAffinePartial2D` + `warpAffine`), BGR→RGB, `(x-127.5)/128`, producing a
+  normalized 512-dim embedding.
 
-If the dlib packages somehow aren't installed, the server still boots and
-registers — it just stores only the MobileFaceNet embedding and logs a warning.
-
-The detector is expected to be a YuNet export with per-stride outputs named `cls_{8,16,32}`, `obj_{8,16,32}`, `bbox_{8,16,32}`, `kps_{8,16,32}`. This is validated at startup. If you swap in a different YuNet export (e.g. a differently-converted ONNX file) and the container fails to start with a `RuntimeError` mentioning "missing expected output tensor", that's this check
-—point `models.face_detector_path` in `config.yaml` at a model exported with the standard YuNet output naming.
+Whichever pairing is configured, the client (`Am-FaceRecognition-Client`) must be
+set to the same `embedder.model` — the server never re-derives embeddings from
+pixels, it only vector-searches whatever the client submits.
 
 ## Utilities
 
 - `./query_db.sh` — open a `sqlite3` shell on `data/db.sqlite`.
 - `python -m app.cli_identify photo.jpg` (run inside the container) — embeds a
   photo and calls `/api/v1/identify/` with it, like a real edge device would.
+
+## Development
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements-dev.txt   # adds pytest, httpx, ruff on top of requirements.txt
+```
+
+Run the tests. `app/core/face_engine.py` builds a real `FaceEngine` at import
+time, so the paths in `config.yaml` (or whatever `CONFIG_PATH` points at) must
+actually resolve — the shipped `config.yaml` uses container-absolute paths
+(`/app/models/...`), which only exist inside the running container's bind
+mount. To run the suite from the host, point `CONFIG_PATH` at a copy of
+`config.yaml` with `models.*_path` rewritten to this repo's `./models`
+directory on disk:
+
+```bash
+python -m pytest tests/ -v                        # inside the container (or after the bind mount is set up)
+CONFIG_PATH=/path/to/host-config.yaml python -m pytest tests/ -v   # from the host
+```
+
+Use `python -m pytest`, not a bare `pytest` — the `-m` form adds the repo root
+to `sys.path` so `import app...` resolves; a bare `pytest` invocation doesn't,
+and fails every test file with `ModuleNotFoundError: No module named 'app'`.
+
+Lint (also enforced by `tests/test_lint.py`, so a `pytest` run catches lint
+regressions too):
+
+```bash
+ruff check .
+```
 
 ## Project layout
 
@@ -264,7 +287,7 @@ app/
   core/
     config.py       # loads config.yaml into typed Settings
     database.py      # SQLite schema + queries
-    face_engine.py    # FaceEngine (YuNet+MobileFaceNet) + DlibEngine (dlib)
+    face_engine.py    # YuNet detection + sface (native cv2) or auraface (onnxruntime) embedding
   routers/
     registrations.py # register / list / get
     identify.py       # id / face / fingerprint lookup
@@ -295,7 +318,7 @@ curl http://localhost:8000/health           # -> {"status":"ok"}
 **3. Set up the client** (`am-mock-client`):
 ```bash
 cd ../am-mock-client
-./setup.sh                                   # native venv; default includes dlib (~10-15 min compile)
+./setup.sh                                   # native venv
 ```
 
 **4. Identify** with a photo of the same person:
@@ -304,11 +327,8 @@ cd ../am-mock-client
 # -> >>> Recognised: <name>     (distance comfortably under the match cutoff)
 ```
 
-That uses the client's **default dlib model**, which now works against this mock
-because registration enrolled a dlib vector too. To use the 512-dim
-YuNet+MobileFaceNet model instead, add `--config config.yunet.yaml`:
-```bash
-.venv/bin/python client.py --config config.yunet.yaml --server <photo.jpg>
-```
-Both talk to this same server on `localhost:8000`. Full client docs:
-`am-mock-client/README.md`.
+The client must be configured to send vectors from the **same** model this
+server is configured with (`models.embedder_model` in `config.yaml` — `sface`
+by default, 128-dim). Registration and identification only agree if both sides
+speak the same embedding space; see `am-mock-client/README.md` for how to
+select its embedder. Talks to this same server on `localhost:8000`.

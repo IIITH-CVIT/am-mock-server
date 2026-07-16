@@ -1,14 +1,13 @@
-from fastapi import FastAPI
-from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi import Request
-from fastapi.responses import JSONResponse 
-
 import logging
-logger = logging.getLogger("mock_server")
+
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.core.database import init_db
 from app.routers import identify, registrations
+
+logger = logging.getLogger("mock_server")
 
 app = FastAPI(title="Mock AM Server", version="0.1.0")
 
