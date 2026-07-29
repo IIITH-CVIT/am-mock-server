@@ -1,9 +1,18 @@
 import os
+import sys
 from dataclasses import dataclass, field
 
 import yaml
 
-CONFIG_PATH = os.environ.get("CONFIG_PATH", "config.yaml")
+# PyInstaller extracts data bundled via --add-data (config.yaml, models/) into
+# a temp dir at sys._MEIPASS; falls back to None when running from source, in
+# which case paths below stay plain and relative to cwd. Same pattern as
+# app/main.py's STATIC_DIR.
+BASE_DIR = getattr(sys, "_MEIPASS", None)
+
+CONFIG_PATH = os.environ.get("CONFIG_PATH") or (
+    os.path.join(BASE_DIR, "config.yaml") if BASE_DIR else "config.yaml"
+)
 
 @dataclass
 class ServerConfig:
@@ -25,6 +34,15 @@ class ModelsConfig:
     # detection runs at each image's real dimensions via setInputSize()
     face_detector_input_size: int = 640
     face_detector_score_threshold: float = 0.5
+
+    def __post_init__(self) -> None:
+        # Bundled models are read from PyInstaller's extracted temp dir, not
+        # cwd, when running as a frozen binary (BASE_DIR is None otherwise,
+        # so this is a no-op when running from source, e.g. in tests).
+        if BASE_DIR:
+            self.face_detector_path = os.path.join(BASE_DIR, self.face_detector_path)
+            self.face_recognizer_path = os.path.join(BASE_DIR, self.face_recognizer_path)
+            self.face_recognizer_auraface_path = os.path.join(BASE_DIR, self.face_recognizer_auraface_path)
 
 @dataclass
 class IdentifyConfig:

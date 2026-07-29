@@ -1,0 +1,46 @@
+name: Build Release Binary
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install system deps for OpenCV
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgl1 libglib2.0-0
+
+      - name: Install Python deps
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      # config.yaml and models/ are bundled into the binary (see run.sh) so it
+      # runs standalone with no external files needed. models/aurar100.onnx
+      # is gitignored, so this binary only supports the default sface
+      # embedder, same limitation the existing CI test job already has.
+      - name: Build binary
+        run: |
+          pyinstaller --noconfirm --clean --onefile --name mock-server \
+            --collect-all cv2 --collect-all onnxruntime --collect-all numpy \
+            --add-data "app/static:app/static" \
+            --add-data "config.yaml:." \
+            --add-data "models:models" \
+            app/__main__.py
+
+      - name: Create Release and upload binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG_NAME" dist/mock-server \
+            --title "$TAG_NAME" \
+            --generate-notes

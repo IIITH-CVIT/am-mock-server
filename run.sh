@@ -22,7 +22,9 @@ if [ ! -d "$VENV" ]; then
 fi
 
 # Rebuild if there's no binary yet, or any source file is newer than it.
-if [ ! -x "$BIN" ] || [ -n "$(find app requirements.txt -newer "$BIN" 2>/dev/null)" ]; then
+# config.yaml and models/ are bundled into the binary now (see below), so
+# changing either also needs to trigger a rebuild to take effect.
+if [ ! -x "$BIN" ] || [ -n "$(find app requirements.txt config.yaml models -newer "$BIN" 2>/dev/null)" ]; then
     log "Installing build dependencies..."
     "$VENV/bin/pip" install --quiet --disable-pip-version-check \
         -r requirements.txt -r requirements-dev.txt
@@ -31,6 +33,8 @@ if [ ! -x "$BIN" ] || [ -n "$(find app requirements.txt -newer "$BIN" 2>/dev/nul
     "$VENV/bin/pyinstaller" --noconfirm --clean --onefile --name mock-server \
         --collect-all cv2 --collect-all onnxruntime --collect-all numpy \
         --add-data "app/static:app/static" \
+        --add-data "config.yaml:." \
+        --add-data "models:models" \
         app/__main__.py
 else
     log "Binary is up to date, skipping rebuild."
