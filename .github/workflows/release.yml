@@ -12,6 +12,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          lfs: true
 
       - uses: actions/setup-python@v6
         with:
@@ -25,8 +27,8 @@ jobs:
 
       # config.yaml and models/ are bundled into the binary (see run.sh) so it
       # runs standalone with no external files needed. models/aurar100.onnx
-      # is gitignored, so this binary only supports the default sface
-      # embedder, same limitation the existing CI test job already has.
+      # is tracked via Git LFS (checkout above pulls it), so both embedders
+      # (sface and auraface) are supported in this binary.
       - name: Build binary
         run: |
           pyinstaller --noconfirm --clean --onefile --name mock-server \

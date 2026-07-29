@@ -53,6 +53,3 @@ Thumbs.db
 build/
 dist/
 *.spec
-
-# Large model weights (too big for git; loaded at runtime from ./models)
-models/aurar100.onnx
